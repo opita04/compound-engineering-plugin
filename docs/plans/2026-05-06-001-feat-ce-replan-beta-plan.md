@@ -8,9 +8,171 @@ origin: docs/brainstorms/2026-05-06-ce-replan-skill-requirements.md
 
 # `ce-replan-beta` Skill
 
+> **⚠ Superseded.** This document is the v1 plan. Live plan lives in `docs/plans/2026-05-06-002-replan-ce-replan-beta-beta-plan.md`. Kept here as the historical snapshot of what shipped to PR #785; the v2 Implementation Adjustments section below captured the post-cora-session reasoning that motivated the rewrite.
+
 ## Summary
 
-Build a new beta skill at `plugins/compound-engineering/skills/ce-replan-beta/` that takes an existing PR plus accumulated learnings and produces a fresh plan document. The skill discovers context in the working repo (original plan, PR review threads, recent brainstorms), re-grounds at the brainstorm tier rather than patching the existing plan, and writes a single combined plan doc to `docs/plans/`. Original PR and plan are preserved untouched. Ships under the plugin's beta-skills framework with `disable-model-invocation: true`.
+Build a new beta skill at `plugins/compound-engineering/skills/ce-replan-beta/` that, when an existing PR's approach has been outgrown by new learnings, runs a two-phase **re-brainstorm → re-plan** cycle and produces a fresh plan that always starts from `main`. Phase one forks the original `*-requirements.md` into a new dated requirements doc with R-IDs carried forward stably. Phase two derives a full-redo plan from the updated requirements. Original PR, plan, and brainstorm are preserved untouched. Ships under the plugin's beta-skills framework with `disable-model-invocation: true`.
+
+> **v2 Update (2026-05-06):** This summary reflects the post-cora-session shape. The v1 implementation (units U1–U6) shipped a delta-shaped single-plan-doc skill; the first real run on cora PR #2382 surfaced that the user's verb maps to "redo from main," not "delta on the PR's tree." See `docs/brainstorms/2026-05-06-ce-replan-skill-requirements.md` § *v2 Shape* for the requirements rationale. The **v2 Implementation Adjustments** section below extends and revises U1–U6.
+
+---
+
+## v2 Implementation Adjustments
+
+Source: cora session `10b929fb-c03f-4daf-b675-32c00ac44b43`, brainstorm § *v2 Shape* (R11–R24, AE6–AE10). v1 units U1–U6 are already shipped on PR #785; v2 layers new units on top and revises a few of the existing ones. U-IDs continue from `U7`; gaps are not introduced.
+
+### Revisions to existing units
+
+- **U3 (`references/regrounding-workflow.md`)** — split into per-phase guidance. The four-step pattern stays, but step 3 (re-question requirements with `[unchanged]/[revise]/[discard]`) **moves up to the re-brainstorm phase** (U7 below). What remains in U3 is the re-grounding-from-artifacts pattern that informs the re-brainstorm's synthesis. Document the load order: re-brainstorm phase reads the rebrainstorm reference (U7), re-plan phase reads the regrounding reference (U3) for any plan-tier re-derivation that doesn't belong in the requirements layer.
+- **U4 (`references/doc-template.md`)** — drop the `[unchanged]/[revise]/[discard]` requirements block from the plan template. The plan now references R-IDs from the forked brainstorm; per-requirement disposition lives in the brainstorm. Cherry-Pick Guidance, Discarded Approaches, Supersedes, and New Learnings sections stay. Filename pattern unchanged. Add an explicit rule: plan units treat `main` as the baseline; code, IDs, or designs that exist only on the original PR's branch must be named in Cherry-Pick Guidance or created by a unit, never assumed present.
+- **U5 (SKILL.md body)** — restructure Phase 2 into two phases: Phase 2a (re-brainstorm, loads U7) and Phase 2b (re-plan-side re-grounding, loads U3). Phase 3 (synthesis) becomes Phase 3a (re-brainstorm synthesis) and Phase 3b (re-plan synthesis); they fire **sequentially** in interactive mode, both silently in pipeline mode. Phase 4 splits: Phase 4a writes the forked brainstorm, Phase 4b writes the new plan. Phase 5 (handoff) commits to `main` as the branch base; ce-work invocation passes the base forward so ce-work doesn't re-ask. Drop any unsolicited "what is not in this plan" emission.
+
+### New units
+
+- U7. **Re-brainstorm workflow reference**
+
+**Goal:** Document the re-brainstorm phase pattern in `references/rebrainstorm-workflow.md`. Loaded on demand when the skill enters Phase 2a.
+
+**Requirements:** R11, R14, R15, R16
+
+**Dependencies:** U1, U2, U3 (script outputs feed re-brainstorm phase)
+
+**Files:**
+- Create: `plugins/compound-engineering/skills/ce-replan-beta/references/rebrainstorm-workflow.md`
+
+**Approach:**
+- Four steps: (1) read original brainstorm + PR threads + recent learnings + commits; (2) re-derive problem frame from user discussion language; (3) walk every original requirement and assign `[unchanged]/[revise]/[discard]` with reasoning, plus list new requirements; (4) compose a Stated/Inferred/Out three-bucket synthesis at the requirements scope (not the plan scope).
+- Document the R-ID stability rule explicitly: original IDs carry through, revisions keep their ID with new wording, discards leave a gap, new IDs continue from max+1. No renumbering, ever.
+- Document frontmatter contract for the forked brainstorm: `supersedes:` (path or filename) and `revision:` (integer, increments on each revolution).
+- Anti-patterns: do not mutate the original brainstorm; do not re-derive WHAT and HOW in one synthesis; do not synthesize a brainstorm out of thin air when none exists upstream.
+- Worked example based on the cora `brief-view` scenario: original sidecar requirements R1–R6, learnings reveal saved-view pivot, output marks R3 `[revise]` with new wording, R5 `[discard]`, adds R7 (post-collapse correctness gaps).
+- Keep under 200 lines.
+
+**Patterns to follow:**
+- Three-bucket synthesis from `plugins/compound-engineering/skills/ce-brainstorm/references/synthesis-summary.md`
+- Anti-pattern callouts from `plugins/compound-engineering/skills/ce-replan-beta/references/regrounding-workflow.md` (U3, already shipped)
+- Frontmatter shape from existing brainstorms in `docs/brainstorms/`
+
+**Test scenarios:**
+- Happy path: agent reads the reference and produces a forked brainstorm with stable R-IDs against the cora scenario (manual eval via skill-creator).
+- Edge case: an original brainstorm with R1, R2, R5 (gaps already exist) produces a fork that preserves the gaps and continues from R6 for new requirements.
+- Edge case: when no original brainstorm exists, the agent skips Phase 2a entirely (covered by R17; verified by U5 routing).
+
+**Verification:**
+- Reference loads via backtick path from SKILL.md without resolution errors.
+- Markdown lints clean.
+- Sample populated brainstorm carries R-IDs correctly across revisions.
+
+---
+
+- U8. **Brainstorm output template reference**
+
+**Goal:** Document the forked-brainstorm output template in `references/brainstorm-template.md`. Loaded on demand when Phase 4a writes the doc.
+
+**Requirements:** R14, R15, R16
+
+**Dependencies:** U1, U7
+
+**Files:**
+- Create: `plugins/compound-engineering/skills/ce-replan-beta/references/brainstorm-template.md`
+
+**Approach:**
+- Follows the existing `ce-brainstorm` requirements template (Summary, Problem Frame, Requirements with R-IDs, Scope Boundaries, etc.) with these v2 additions:
+  - Frontmatter includes `supersedes:` and `revision:`.
+  - Each carried-forward R-ID has a one-line marker `[unchanged from rev N]` or `[revised from rev N]` so the loop's history is visible inline. Discarded R-IDs are listed in a `## Discarded Requirements` section with the original wording and the reason — they leave a gap in the active list, but the gap is documented.
+  - `## New Learnings` section names the sources that drove this revision (PR thread URLs, brainstorm doc paths, conversation references).
+- Filename convention: `docs/brainstorms/YYYY-MM-DD-<topic>-requirements.md` with today's date. Topic stays the same as the original; `supersedes:` and `revision:` carry the lineage.
+- Repo-relative paths only; no absolute paths.
+
+**Patterns to follow:**
+- `plugins/compound-engineering/skills/ce-brainstorm/references/requirements-capture.md` for the canonical template shape.
+- v1's `references/doc-template.md` (U4) for the supersedes/learnings idioms.
+
+**Test scenarios:**
+- Happy path: a populated brainstorm template against the cora scenario produces a doc with stable R-IDs and visible lineage (manual eval).
+- Edge case: original brainstorm with no R-IDs (older format) — the re-brainstorm phase derives implicit R-IDs first, then forks. Document the fallback in this reference.
+- Integration: forked brainstorm passes through `ce-doc-review` cleanly (manual eval).
+
+**Verification:**
+- Reference loads via backtick path from SKILL.md.
+- Sample populated brainstorm is consumable by `ce-plan` (or `ce-replan-beta`'s Phase 2b) without re-asking the user.
+
+---
+
+- U9. **Surface jq failures in `fetch-pr-context.sh`**
+
+**Goal:** Eliminate silent jq exit-5 failures in PR context fetching, so downstream synthesis sees structured signals rather than empty stdout.
+
+**Requirements:** R22
+
+**Dependencies:** U2
+
+**Files:**
+- Modify: `plugins/compound-engineering/skills/ce-replan-beta/scripts/fetch-pr-context.sh`
+
+**Approach:**
+- Audit the existing jq filter for keys that may not always be present (review threads with empty `comments.nodes`, PRs with no reviews, no commits, etc.). Three jq calls in the cora run exited with code 5; document which keys were missing and add `// null` defaults or `// empty` filters as appropriate.
+- Where a key is genuinely optional, prefer `// null` so the consumer (the agent reading the JSON) sees an explicit null rather than absence.
+- For required keys that genuinely shouldn't be missing on a valid PR (`pr.number`, `pr.url`), keep the strict access — a missing required key should still surface as an error, just with a clearer message.
+- Do not swallow real errors. The fix is "no silent gaps," not "no errors at all."
+
+**Patterns to follow:**
+- Existing jq idioms in `plugins/compound-engineering/skills/ce-resolve-pr-feedback/scripts/get-pr-comments`.
+
+**Test scenarios:**
+- Happy path: against a real PR with full data, the script's output is unchanged.
+- Edge case: against a PR with no review threads, the `review_threads` key in the output is `[]`, not missing.
+- Edge case: against a PR with no top-level reviews, the `review_bodies` key is `[]`.
+- Error path: against a PR the user lacks access to, the script exits non-zero with a clear `gh` error on stderr.
+
+**Verification:**
+- Re-run against the cora `brief-view` PR. Confirm zero jq errors on a normal invocation.
+- Sample output against a freshly-opened PR with no reviews yet; confirm structured empty arrays.
+
+---
+
+- U10. **Handoff cleanup — commit to branch base, drop unsolicited essay**
+
+**Goal:** Phase 5 of the skill commits to `main` as the branch base and hands off cleanly to `ce-work` without ce-work re-asking. The unsolicited "what is not in this plan" emission from the cora run is removed.
+
+**Requirements:** R23, R24
+
+**Dependencies:** U5
+
+**Files:**
+- Modify: `plugins/compound-engineering/skills/ce-replan-beta/SKILL.md` (Phase 5 section)
+
+**Approach:**
+- Phase 5's handoff menu remains three options: Start `ce-work` / Open in Proof / Done. Wording and routing stay; the skill-invocation primitive call to `ce-work` carries the new plan path AND the branch base (`main`).
+- Document explicitly: do not emit unsolicited summaries about what is excluded from the plan after writing it. The plan doc itself is the artifact; commentary belongs in chat earlier or not at all.
+- Add a discipline check at the end of Phase 4b: confirm the plan doc was written with `Files:` references against `main`, not against the existing PR's branch. The check fires before the handoff menu.
+
+**Patterns to follow:**
+- Inline post-menu routing pattern from `plugins/compound-engineering/skills/ce-plan/SKILL.md` Phase 5.4.
+
+**Test scenarios:**
+- Happy path: invoke skill, accept synthesis, write doc, select "Start ce-work." ce-work begins with `main` as base, no branch-base question to the user.
+- Edge case: select "Open in Proof" — branch base is irrelevant; doc loads in Proof for review.
+- Edge case: select "Done" — skill ends cleanly; no unsolicited essay.
+
+**Verification:**
+- Manual eval against the cora scenario via skill-creator.
+- Confirm transcript has no "Plan updated to reflect option 2" or similar self-edits between menu render and user selection.
+
+---
+
+### Sequencing
+
+1. U7 (re-brainstorm workflow) and U8 (brainstorm template) can land in parallel — independent references.
+2. U9 (jq fix) is independent of U7/U8; can land any time.
+3. U3, U4, U5 revisions land **after** U7 and U8 because U5 imports U7 and U4 references the new brainstorm template's R-ID conventions.
+4. U10 (handoff cleanup) lands with U5 since both modify SKILL.md.
+5. README and validation (analogous to v1's U6) updates in the same PR; no new skill name, no count change.
+
+### Validation strategy
+
+Same as v1: behavioral testing manual via skill-creator. The cora scenario serves as the canonical regression check — re-running v2 against `brief-view` should produce a forked brainstorm with stable R-IDs and a from-`main` plan whose units don't reference post-pivot code.
 
 ---
 
