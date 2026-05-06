@@ -97,7 +97,7 @@ For `/ce-optimize`, see [`skills/ce-optimize/README.md`](./skills/ce-optimize/RE
 | Skill | Description |
 |-------|-------------|
 | `ce-polish-beta` | Human-in-the-loop polish phase after /ce-code-review — verifies review + CI, starts a dev server from `.claude/launch.json`, generates a testable checklist, and dispatches polish sub-agents for fixes. Emits stacked-PR seeds for oversized work |
-| `ce-replan-beta` | Replan from an existing PR after new learnings — re-grounds at the brainstorm tier rather than patching the existing plan, produces a fresh plan doc naming what to discard, what to cherry-pick, and the revised approach. Original PR preserved as a superseded artifact |
+| `ce-replan-beta` | Replan from an existing PR after new learnings — runs a two-phase re-brainstorm + re-plan flow, forking the original requirements doc with R-IDs carried forward stably and producing a fresh full-redo plan from main. Original PR, plan, and brainstorm preserved as superseded artifacts |
 | `/lfg` | Full autonomous engineering workflow |
 
 ## Agents
