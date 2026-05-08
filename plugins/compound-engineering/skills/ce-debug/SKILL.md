@@ -43,7 +43,7 @@ Read the full conversation — the original description AND every comment, with 
 
 **Everything else** (stack traces, test paths, error messages, descriptions of broken behavior): the problem statement is the input itself.
 
-**Trivial-bug fast-path:** Once the problem is clear, decide whether the framework is needed at all. If the cause is immediately readable from the input (single-file typo, missing import, obvious null deref or off-by-one with a one-line fix) and verification doesn't require deep tracing — fix it directly, leave a one-line note explaining the cause, and skip to Phase 4's structured summary. When in doubt, run the full framework; getting the wrong root cause costs more than the few minutes of ceremony.
+**Trivial-bug fast-path:** Once the problem is clear, decide whether the framework is needed at all. If the cause is immediately readable from the input (single-file typo, missing import, obvious null deref or off-by-one with a one-line fix) and verification doesn't require deep tracing — run Phase 3's **Workspace and branch check** first (uncommitted-work confirmation and default-branch branch-creation prompt), then fix it directly, leave a one-line note explaining the cause, and skip to Phase 4's structured summary. When in doubt, run the full framework; getting the wrong root cause costs more than the few minutes of ceremony.
 
 **Otherwise**, proceed to Phase 1.
 
