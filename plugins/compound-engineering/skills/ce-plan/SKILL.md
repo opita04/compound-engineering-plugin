@@ -177,37 +177,41 @@ Classify the work into one of these plan depths:
 
 If depth is unclear, ask one targeted question and then continue.
 
-#### 0.7 Solo-Mode Scope Summary
+#### 0.7 Solo-Mode Scoping Synthesis
 
 Surface call-outs to the user — the specific forks in scope or approach where user input materially changes the plan — so scope can be corrected **before Phase 1 research is spent**. Sub-agent dispatch (repo-research-analyst, learnings-researcher, etc.) is the expensive next step this phase guards against wasted effort on.
 
 Fires **only in solo invocation** — when Phase 0.2 found no upstream brainstorm doc AND Phase 0.4 stayed in ce-plan (did not route to ce-debug, ce-work, or universal-planning) AND Phase 0.5 cleared (no unresolved blockers) AND not on Phase 0.1 fast paths (resume normal, deepen-intent). Each guard is an explicit conditional. Skip Phase 0.7 entirely when any guard fails — brainstorm-sourced invocations defer to Phase 5.1.5 instead.
 
-**Read `references/synthesis-summary.md` before composing the synthesis.** It carries the affirmability test, keep-test criteria, granularity rules, anti-patterns, revision-vs-confirmation discipline, doc-shape routing, soft-cut behavior, self-redirect support, the worked PII compression example, and full headless-mode routing — all required for well-shaped call-outs.
+**Read `references/synthesis-summary.md` before composing the scoping synthesis.** It carries the affirmability test, keep-test criteria, detail test, summary shape budgets, granularity rules, anti-patterns, revision-vs-confirmation discipline, doc-shape routing, soft-cut behavior, self-redirect support, the worked PII compression example, and full headless-mode routing — all required for a well-shaped synthesis.
 
 **Required gate output — do not skip; silent proceeding is not allowed.** Compose an internal three-bucket scope draft (Stated / Inferred / Out of scope — internal thinking that feeds plan-body routing at Phase 5.2, not the chat output below). Derive call-outs (specific forks where user input materially changes the plan), then emit one of the two literal templates below in chat before continuing to Phase 1.
 
-**When one or more call-outs survive:**
+**Summary shape:** prose, bullets, or mix — whichever communicates best. Match plan depth (Lightweight 1-3 lines; Standard 3-5 lines or 2-4 bullets; Deep 4-6 lines or 3-6 bullets). 1-2 lines per bullet, conversational not documentary. See reference for keep test, detail test, and re-cut rule.
+
+**Tier guard on auto-proceed:** the auto-proceed path (announce without waiting for confirmation) fires only when plan depth is **Lightweight AND zero call-outs survive**. Standard and Deep plans always fire the confirmation gate, even with zero call-outs — substance earns the checkpoint, not interaction history.
+
+**Confirmation template (Standard/Deep regardless of call-out count, or any tier with one or more call-outs surviving):**
 
 ````text
 Based on your request and our brief discussion, here's the scope I'm proposing to plan against:
 
-[1-3 line prose summary — what scope the plan will target, in plain language.]
+[summary — shape per tier above]
 
-**Call outs:**
-- [decision-level fork the user can affirm or redirect — one bullet per real fork; count varies by plan depth]
+**Call outs:** (omit this header when zero forks survived the keep test)
+- [decision-level fork the user can affirm or redirect — one bullet per real fork]
 
-Confirm to proceed, or tell me which of these to redirect. (You can also redirect to /ce-brainstorm if this is bigger than you initially thought — I'll stop here and load it for you.)
+Confirm and I'll proceed to research, drawing on this scope. (You can also redirect to /ce-brainstorm if this is bigger than you initially thought — I'll stop here and load it for you.)
 ````
 
 Wait for user confirmation before continuing to Phase 1.
 
-**When zero call-outs survive:**
+**Auto-proceed template (Lightweight with zero call-outs only):**
 
 ````text
-Planning: [1-3 line prose summary — what scope the plan will target]
+Planning: [1-3 line summary]
 
-No open decisions for you to weigh in on — proceeding to research. Interrupt if I have the scope wrong.
+No open decisions to weigh in on — proceeding to research. Interrupt if I have the scope wrong.
 ````
 
 Then continue to Phase 1 without a blocking question.
@@ -557,37 +561,41 @@ If the plan originated from a requirements document, re-read that document and v
 - If origin supplies A/F/AE IDs: every origin R/F/AE that *affects implementation* is referenced in Requirements, a U-ID unit, test scenarios, verification, scope boundaries, or explicitly deferred. Actors are carried forward when they affect behavior, permissions, UX, orchestration, handoff, or verification. The standard is preservation of product intent, not mandatory ID spam — irrelevant origin IDs may be omitted
 - If origin was Deep-product (origin contains an `Outside this product's identity` subsection): the plan's Scope Boundaries preserves the three-way split — `Deferred for later` and `Outside this product's identity` carried verbatim from origin, `Deferred to Follow-Up Work` reserved for plan-local implementation sequencing
 
-#### 5.1.5 Brainstorm-Sourced Scope Summary
+#### 5.1.5 Brainstorm-Sourced Scoping Synthesis
 
 Surface plan-time call-outs to the user before Phase 5.2 commits the plan to disk — the latest cheap moment to catch plan-time scope errors. The brainstorm already validated WHAT to build; this phase surfaces HOW the plan will execute on the forks that matter.
 
 Fires **only when the plan was sourced from an upstream brainstorm doc** (Phase 0.2 found a `*-requirements.md` match) AND not on Phase 0.1 fast paths (resume normal, deepen-intent). Skip Phase 5.1.5 in solo invocation — solo plans handled their synthesis in Phase 0.7.
 
-**Read `references/synthesis-summary.md` before composing the synthesis.** It carries the affirmability test, keep-test criteria, granularity rules, anti-patterns, revision-vs-confirmation discipline, doc-body reading rules, doc-shape routing, soft-cut behavior, self-redirect support, the worked PII compression example, and full headless-mode routing — all required for well-shaped call-outs.
+**Read `references/synthesis-summary.md` before composing the scoping synthesis.** It carries the affirmability test, keep-test criteria, detail test, summary shape budgets, granularity rules, anti-patterns, revision-vs-confirmation discipline, doc-body reading rules, doc-shape routing, soft-cut behavior, self-redirect support, the worked PII compression example, and full headless-mode routing — all required for a well-shaped synthesis.
 
 **Required gate output — do not skip; silent proceeding is not allowed.** Compose an internal three-bucket scope draft (Stated / Inferred / Out of scope — internal thinking that feeds plan-body routing at Phase 5.2, not the chat output below). Derive call-outs (specific forks where user input materially changes the plan), then emit one of the two literal templates below in chat before continuing to Phase 5.2.
 
-**When one or more call-outs survive:**
+**Summary shape:** prose, bullets, or mix — whichever communicates best. Match plan depth (Lightweight 1-3 lines; Standard 3-5 lines or 2-4 bullets; Deep 4-6 lines or 3-6 bullets). 1-2 lines per bullet, conversational not documentary. See reference for keep test, detail test, and re-cut rule.
+
+**Tier guard on auto-proceed:** the auto-proceed path (announce without waiting for confirmation) fires only when plan depth is **Lightweight AND zero call-outs survive**. Standard and Deep plans always fire the confirmation gate, even with zero call-outs — substance earns the checkpoint, not interaction history.
+
+**Confirmation template (Standard/Deep regardless of call-out count, or any tier with one or more call-outs surviving):**
 
 ````text
 Based on the upstream brainstorm and the research findings, here's the implementation scope I'm proposing for the plan:
 
-[1-3 line prose summary — how the implementation approaches the work (files/modules, patterns, scope honored), in plain language.]
+[summary — shape per tier above]
 
-**Call outs:**
-- [plan-time fork the user can affirm or redirect — one bullet per real fork; count varies by plan depth]
+**Call outs:** (omit this header when zero forks survived the keep test)
+- [plan-time fork the user can affirm or redirect — one bullet per real fork]
 
-Confirm to proceed, or tell me which of these to redirect.
+Confirm and I'll write the plan next, drawing on the brainstorm, research, and this synthesis.
 ````
 
 Wait for user confirmation before continuing to Phase 5.2.
 
-**When zero call-outs survive:**
+**Auto-proceed template (Lightweight with zero call-outs only):**
 
 ````text
-Planning: [1-3 line prose summary — implementation shape]
+Planning: [1-3 line summary — implementation shape]
 
-No open decisions for you to weigh in on — proceeding to plan-write. Interrupt if I have the scope wrong.
+No open decisions to weigh in on — proceeding to plan-write. Interrupt if I have the scope wrong.
 ````
 
 Then continue to Phase 5.2 without a blocking question.
