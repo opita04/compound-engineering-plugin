@@ -824,7 +824,7 @@ The fixer accepts two queue shapes depending on which caller invoked it:
   - residual actionable work
   - advisory-only outputs
   Per-agent full-detail JSON files (`{reviewer_name}.json`) are already present in this directory from Stage 4 dispatch.
-- Also write `metadata.json` alongside the findings so downstream skills (e.g., `ce-polish-beta`) can verify the artifact matches the current branch and HEAD. Minimum fields:
+- Also write `metadata.json` alongside the findings so downstream skills (e.g., `ce-polish`) can verify the artifact matches the current branch and HEAD. Minimum fields:
   ```json
   {
     "run_id": "<run-id>",
