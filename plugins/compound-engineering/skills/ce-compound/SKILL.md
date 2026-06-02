@@ -404,7 +404,7 @@ The orchestrator (main conversation) performs ALL of the following in one sequen
    - YAML frontmatter with track-appropriate fields, applying the YAML-safety quoting rule for array items (see `references/yaml-schema.md` > YAML Safety Rules)
    - Bug track: Problem, root cause, solution with key code snippets, one prevention tip
    - Knowledge track: Context, guidance with key examples, one applicability note
-4. **Vocabulary capture (update-only)**: if `CONCEPTS.md` exists at repo root, read `references/concepts-vocabulary.md`, then scan the new doc and the conversation for qualifying terms and add/refine entries silently (same criteria as Phase 2.4). Do **not** bootstrap or seed in lightweight mode — if `CONCEPTS.md` does not exist, defer creation to a Full run, which owns seeding. Record the outcome in the output (e.g., "Vocabulary: 1 entry refined" or "scanned, no qualifying terms").
+4. **Vocabulary capture (update-only)**: if `CONCEPTS.md` exists at repo root, read `references/concepts-vocabulary.md`, then scan the new doc and the conversation for qualifying terms and add/refine entries silently (same criteria as Phase 2.4). Do **not** bootstrap or seed in lightweight mode — if `CONCEPTS.md` does not exist, defer creation to a Full run, which owns seeding. Record the outcome in the output (e.g., "Vocabulary: 1 entry refined" or "scanned, no qualifying terms"). If you refined `CONCEPTS.md` and a quick read of `AGENTS.md`/`CLAUDE.md` shows it isn't surfaced there, add the discoverability tip to the output below — lightweight **tips**, it does not edit instruction files (a Full run owns that edit).
 5. **Skip specialized agent reviews** (Phase 3) to conserve context
 
 **Lightweight output:**
@@ -417,6 +417,10 @@ File created:
 [If discoverability check found instruction files don't surface the knowledge store:]
 Tip: Your AGENTS.md/CLAUDE.md doesn't surface docs/solutions/ to agents —
 a brief mention helps all agents discover these learnings.
+
+[If CONCEPTS.md was refined this run and isn't surfaced in the instruction files:]
+Tip: Your AGENTS.md/CLAUDE.md doesn't surface CONCEPTS.md —
+a one-line mention helps agents find the shared vocabulary.
 
 Note: This was created in lightweight mode. For richer documentation
 (cross-references, detailed prevention strategies, specialized reviews),
