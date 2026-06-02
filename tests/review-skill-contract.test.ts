@@ -17,7 +17,8 @@ describe("ce-code-review contract", () => {
     expect(content).toContain("mode:agent")
     expect(content).toContain("mode:headless")
     expect(content).toContain("/tmp/compound-engineering/ce-code-review/<run-id>/")
-    expect(content).toMatch(/Never edit project files/i)
+    expect(content).toMatch(/Never commit, push, create PRs, or file tickets/i)
+    expect(content).toMatch(/never mutates the tree/i)
     expect(content).toContain("run artifact")
     expect(content).toMatch(/check out the PR branch/i)
     expect(content).toMatch(/Never run `gh pr checkout`/i)
@@ -49,12 +50,10 @@ describe("ce-code-review contract", () => {
     expect(content).toContain('"status": "complete"')
     expect(content).toContain("review.json")
 
-    // Review-only everywhere
-    expect(content).toMatch(/Never edit project files/i)
-
-    // No ticket filing from this skill
-    expect(content).toMatch(/file tickets/i)
-    expect(content).toMatch(/Never edit project files.*commit, push/i)
+    // Never ship from this skill (any mode); apply only in default, report-only in mode:agent
+    expect(content).toMatch(/Never commit, push, create PRs, or file tickets/i)
+    expect(content).toMatch(/never mutates the tree/i)
+    expect(content).toMatch(/default \(interactive\).{0,4}mode the review may/i)
 
     // Never checkout — explicit mutations only
     expect(content).toMatch(/Never run `gh pr checkout`/i)
@@ -299,6 +298,35 @@ describe("ce-code-review contract", () => {
     expect(validatorTemplate).toContain('"validated": true | false')
     expect(validatorTemplate).toMatch(/introduced by THIS diff/i)
     expect(validatorTemplate).toMatch(/handled elsewhere/i)
+  })
+
+  test("Stage 5c applies safe fixes in default mode, report-only in mode:agent, no deny-list", async () => {
+    const content = await readRepoFile("plugins/compound-engineering/skills/ce-code-review/SKILL.md")
+    const template = await readRepoFile(
+      "plugins/compound-engineering/skills/ce-code-review/references/review-output-template.md",
+    )
+
+    // New act stage, default-mode only; mode:agent stays report-only
+    expect(content).toContain("### Stage 5c: Act on findings")
+    expect(content).toMatch(/Skip entirely in `mode:agent`/i)
+    expect(content).toMatch(/`mode:agent` does not apply fixes/i)
+
+    // Bias to act, push back if wrong, no deny-list
+    expect(content).toMatch(/bias to act/i)
+    expect(content).toMatch(/Push back.*do not apply.*reviewer is wrong/i)
+    expect(content).toMatch(/There is no deny-list/i)
+
+    // Scope invariant + verify-then-keep + no auto-commit
+    expect(content).toMatch(/Apply only when the working tree \*?is\*? what was reviewed/i)
+    expect(content).toMatch(/revert that fix and report it/i)
+    expect(content).toMatch(/Do not commit/)
+
+    // Applied reporting (skill + template)
+    expect(content).toMatch(/Applied \(default mode only\)/i)
+    expect(template).toContain("### Applied")
+
+    // No apply mode revived
+    expect(content).toMatch(/there is no apply \*?mode\*?/i)
   })
 
   test("PR-mode skip-condition pre-check stops without dispatching reviewers", async () => {
@@ -664,6 +692,15 @@ describe("ce-code-review contract", () => {
       ([, id]) => Number(id),
     )
     expect(primaryFindingIds).toEqual([1, 2, 3])
+
+    // Applied findings keep their stable # and appear only in the Applied section (default mode), not severity tables
+    const appliedSection = fixture.split("### Applied")[1].split("\n### ")[0]
+    const appliedIds = Array.from(
+      appliedSection.matchAll(/^\| (\d+) \| `[^`]+` \| .* \| .* \|$/gm),
+      ([, id]) => Number(id),
+    )
+    expect(appliedIds).toEqual([4])
+    expect(appliedIds.every((id) => !primaryFindingIds.includes(id))).toBe(true)
 
     const residualSection = fixture.split("### Actionable Findings")[1]
     const residualIds = Array.from(

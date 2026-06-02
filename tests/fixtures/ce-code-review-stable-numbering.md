@@ -2,9 +2,17 @@
 
 **Scope:** merge-base with main -> working tree
 **Intent:** Demonstrate stable finding numbering
-**Mode:** agent
+**Mode:** interactive
 
 **Reviewers:** correctness, testing, maintainability
+
+### Applied (safe, verified)
+
+| # | File | Fix | Reviewer |
+|---|------|-----|----------|
+| 4 | `export_service_test.rb:120` | Added coverage for the empty-array branch | testing |
+
+Validation: tests 18 -> 19; suite 96 pass, lint clean.
 
 ### P1 -- High
 

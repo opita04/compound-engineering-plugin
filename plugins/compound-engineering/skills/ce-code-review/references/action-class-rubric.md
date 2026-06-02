@@ -1,6 +1,6 @@
 # `autofix_class` rubric (personas)
 
-`autofix_class` describes the **intrinsic shape** of follow-up work — not whether a caller should auto-apply a fix. This skill does not apply fixes; callers interpret findings and own apply policy.
+`autofix_class` describes the **intrinsic shape** of follow-up work — it is signal, **not an apply gate or permission**. In `mode:agent` the caller interprets findings and owns apply; in default (interactive) mode the review applies safe fixes itself by judgment (SKILL.md Stage 5c). Either way the class informs *what to do first* and *what to flag* — it does not mechanically decide what gets applied.
 
 | `autofix_class` | Meaning |
 |-----------------|---------|

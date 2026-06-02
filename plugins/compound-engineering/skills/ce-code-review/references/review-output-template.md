@@ -19,6 +19,15 @@ Use this **exact format** when presenting synthesized review findings. Findings 
 - security -- new public endpoint accepts user-provided format parameter
 - api-contract -- new /api/orders/export route with response schema
 
+### Applied (safe, verified)
+
+| # | File | Fix | Reviewer |
+|---|------|-----|----------|
+| 6 | `export_helper_test.rb:40` | Added missing test for the empty-format branch | testing |
+| 7 | `orders_controller_test.rb:88` | Strengthened no-op assertion to check ownership is unchanged | testing |
+
+Validation: export tests 11 -> 13; suite 214 pass, lint clean.
+
 ### P0 -- Critical
 
 | # | File | Issue | Reviewer | Confidence |
@@ -119,6 +128,7 @@ This fails because: no pipe-delimited tables, no severity-grouped `###` headers,
 - **No `Route` column in the per-severity tables** -- the synthesized route (``<autofix_class> -> <owner>``) appears only in the Actionable Findings table and the `mode:agent` JSON. The scannable severity tables are 5 columns: `# | File | Issue | Reviewer | Confidence`.
 - **Header includes** scope, intent, and reviewer team with per-conditional justifications
 - **Mode line** -- include `interactive`, `report-only`, or `agent`
+- **Applied section (default mode only)** -- when the review applied fixes (Stage 5c), list them first, before the severity tables, as `# | File | Fix | Reviewer` followed by a one-line validation outcome (e.g. "suite 214 pass, lint clean"). Flag green-but-unverifiable edits (auth/contract/concurrency) prominently. Applied findings keep their stable `#` and appear only here, not in the severity tables. Omit in `mode:agent` and when nothing was applied
 - **Actionable Findings section** -- include when the actionable queue is non-empty (findings for the caller to handle)
 - **Pre-existing section** -- separate table, no confidence column (these are informational)
 - **Learnings & Past Solutions section** -- results from ce-learnings-researcher, with links to docs/solutions/ files
@@ -139,5 +149,6 @@ Key differences from the interactive markdown format:
 
 - **No pipe-delimited tables** — findings are JSON arrays with merged fields (`#`, `title`, `severity`, `file`, `line`, `confidence`, `autofix_class`, `owner`, `suggested_fix`, `why_it_matters`, `evidence`, `reviewers`, etc.).
 - **`actionable_findings`** — subset for caller apply workflows (`gated_auto` / `manual` with `downstream-resolver`).
+- **No `applied_fixes` and no Applied section** — `mode:agent` does not apply fixes; the caller does. Applied work surfaces only in default-mode markdown (Stage 5c/6). The handoff is `actionable_findings`.
 - **Failure/degraded paths** — `{"status":"failed","reason":"..."}` or `"status":"degraded"` with reason; never mix markdown tables into the JSON response.
 - **Stable `#`** — same numbering as Stage 5 synthesis, carried in JSON finding objects for downstream apply/residual tracking.

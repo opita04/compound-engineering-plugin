@@ -40,21 +40,23 @@ For human / interactive shipping, invoke `ce-code-review` without `mode:agent` i
 
 ## What to apply
 
-Apply a finding in the working tree only when **all** of the following hold:
+Default to applying every actionable finding. Applying is a reversible edit to a tracked tree; diffs are reviewed before commit (below) and tests run after — so leaving a clear, reversible fix unapplied "to be safe" is the failure mode, not the safe choice. Bias to act:
 
-1. **`suggested_fix` is present** — the reviewer committed to a concrete change shape.
-2. **`confidence` is `100`, or `75` with cross-persona agreement noted in the report** — do not apply anchor-50 findings.
-3. **The fix is mechanical** — one coherent change, no contract/permission/security posture change, no new public API shape, no behavior change that needs product sign-off. When unsure at filter time, skip and leave the finding for the Residual Work Gate.
-4. **Evidence still matches the code** — verified by whoever applies the edit (usually a fix subagent at `file:line`). The orchestrator does **not** open files just to decide eligibility or dispatch.
+- **Apply** any finding with a concrete `suggested_fix` that is a clear improvement — the common case. `confidence` and `autofix_class` tell you what to prioritize and what to flag, not whether you may apply: `autofix_class` is signal, **never permission**.
+- **Push back** — keep the finding, don't apply — when the reviewer is wrong; note why.
+- **Flag, don't block, green-but-unverifiable edits** — when an applied fix touches auth/authz, a public or cross-service contract/schema, or concurrency, a passing test does not prove safety; apply it when there is a clear `suggested_fix` and confidence, and call it out prominently in the diff review.
 
-Classify at apply time using the rules above — do not treat `autofix_class` as permission to auto-apply.
+There is no precondition safety checklist and no deny-list — a code-review fix is a reversible edit, so downside is controlled after the fact (diff review + tests + the commit checkpoint), not by gating the apply.
 
-## What not to apply
+**Evidence still matches the code** — the fix subagent confirms at `file:line` before editing. The orchestrator does **not** open files just to decide eligibility or dispatch.
 
-- `autofix_class: manual` without a clear mechanical `suggested_fix`
-- `autofix_class: advisory` — report-only
-- `gated_auto` findings that change behavior, contracts, auth, or permissions
-- Anything the user would need to walk through in a design conversation
+## What to defer (to the Residual Work Gate)
+
+- `autofix_class: advisory` — report-only.
+- Findings with no concrete `suggested_fix` to act on.
+- Findings whose right fix depends on a design or product decision — architecture direction, contract shape, or a behavior change needing sign-off. These need a human call before code changes.
+
+Surface what was deferred and why; never silently drop.
 
 ## Execution — orchestrator batches, subagents apply
 
