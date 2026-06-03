@@ -22,7 +22,7 @@ Parse `$ARGUMENTS` for optional tokens. Strip each recognized token before inter
 
 | Token | Example | Effect |
 |-------|---------|--------|
-| `mode:agent` | `mode:agent` | Return **JSON** instead of markdown tables — the only behavioral difference from default (see Output format) |
+| `mode:agent` | `mode:agent` | **Report-only**: return **JSON** instead of markdown tables and skip the Stage 5c apply (the caller applies). Does not change reviewer selection, merge logic, or scope rules (see Output format) |
 | `mode:headless` | `mode:headless` | **Deprecated alias** for `mode:agent` |
 | `mode:report-only` | `mode:report-only` | **Deprecated — ignored.** Former no-artifacts mode; default behavior is review-only without checkout |
 | `base:<sha-or-ref>` | `base:abc1234` or `base:origin/main` | Diff base on the **current checkout** (explicit; skips auto base detection) |
@@ -32,8 +32,9 @@ Parse `$ARGUMENTS` for optional tokens. Strip each recognized token before inter
 
 **Conflicting arguments:** Stop without dispatching reviewers when:
 - Multiple incompatible scope selectors appear together (e.g. `base:` **and** a PR number/branch target — `base:` means "review the current checkout against this base")
-- Deprecated `mode:autofix` is present (see below)
 - Multiple distinct `mode:` tokens other than the `mode:agent`/`mode:headless` alias pair
+
+Deprecated `mode:autofix` is **not** a conflict — ignore the token and proceed with the normal flow (see below).
 
 Emit a one-line failure reason. In `mode:agent`, return JSON: `{"status":"failed","reason":"..."}`.
 
@@ -53,7 +54,7 @@ Same pipeline for default and `mode:agent`:
 | **Default** | Markdown report (pipe-delimited finding tables) + Actionable Findings summary |
 | **`mode:agent`** | One JSON object (see ### JSON output format below) + the same `/tmp/.../ce-code-review/<run-id>/` artifacts |
 
-`mode:agent` changes **serialization only**, not reviewer selection, merge logic, or scope rules.
+`mode:agent` is **report-only**: it skips the Stage 5c apply (the caller applies) and serializes findings as JSON instead of markdown. It does not change reviewer selection, merge logic, or scope rules.
 
 The `mode:agent` JSON is the **deterministic, machine-readable contract** for programmatic and cross-harness callers (Codex, Gemini, etc.) — route automation through it, not through the markdown. The default markdown is the **human-readable view**; it will render differently across terminals and harnesses, so keep it ASCII-safe (pipe tables, `->` not middot `·`, no box-drawing) so it degrades gracefully where rendering differs.
 
@@ -221,7 +222,8 @@ When **`pr-remote`**, before Stage 4:
 
 1. Best-effort fetch PR head without checkout: `git fetch --no-tags origin <headRefName>:refs/review/pr-<number>-head` (substitute PR number from metadata).
 2. When fetch succeeds, set `PR_HEAD_REF=refs/review/pr-<number>-head` for reviewers and validators. When fetch fails, omit `PR_HEAD_REF` and note in Coverage — reviewers must rely on diff hunks only.
-3. Include `<pr-scope-mode>pr-remote</pr-scope-mode>` and, when set, `<pr-head-ref>...</pr-head-ref>` in the Stage 4 review context bundle.
+3. Best-effort fetch the PR base without checkout: `git fetch --no-tags origin <baseRefName>`. When it succeeds, resolve a concrete ref with `git rev-parse FETCH_HEAD` and set `PR_BASE_REF` to that SHA — a **real git base ref** reviewers and validators use for file-level git diffs (e.g. `ce-data-migration-reviewer` runs `git diff <PR_BASE_REF> -- db/schema.rb`/`structure.sql`). The `pr:<number-or-url>` logical marker in `BASE:` stays the scope marker; `PR_BASE_REF` is the diffable base. When the fetch fails, omit `PR_BASE_REF` and note in Coverage — schema-drift and other git-diff checks fall back to diff hunks only and must **not** assume `main`.
+4. Include `<pr-scope-mode>pr-remote</pr-scope-mode>` and, when set, `<pr-head-ref>...</pr-head-ref>` and `<pr-base-ref>...</pr-base-ref>` in the Stage 4 review context bundle.
 
 Reviewers and Stage 5b validators in **`pr-remote`** mode must **not** Read/Grep workspace paths for files in `FILES:`. Inspect via `git show <PR_HEAD_REF>:<path>` when `PR_HEAD_REF` is set, otherwise use only the provided diff hunks. **`local-aligned`** uses normal workspace inspection.
 
@@ -562,7 +564,7 @@ Do not include time estimates.
 
 ### JSON output format (`mode:agent` only)
 
-Emit **one JSON object** as the primary response (fenced ```json block or raw JSON — caller must be able to parse it). Also write `review.json` under `/tmp/compound-engineering/ce-code-review/<run-id>/` with the same payload.
+Emit **one raw JSON object** as the primary response — a single bare JSON value, **no markdown code fence**. A leading ```` ```json ```` fence makes the response start with backticks and breaks naive `JSON.parse` consumers, so never wrap it. Also write `review.json` under `/tmp/compound-engineering/ce-code-review/<run-id>/` with the same payload.
 
 `mode:agent` does not apply fixes — the caller does — so there is no `applied_fixes` field; the handoff is `actionable_findings`. Applied work surfaces only in the default-mode markdown Applied section (Stage 5c/6).
 
@@ -624,13 +626,15 @@ Do not spawn stack reviewers mechanically from file extensions alone. The trigge
 
 After Stage 6, stop. Never push, open PRs, or file tickets from this skill. In default (interactive) mode, Stage 5c has applied the safe fixes (Applied section) — committed as an isolated `fix(review):` commit when the tree was clean, or left for the user's commit when it wasn't. In `mode:agent` the review mutates nothing — the caller (for example `ce-work`) and the user apply fixes, file tickets, or accept residual risk using the report and artifact.
 
-### Emit actionable findings summary
+### Emit actionable findings summary (default mode only)
 
-After Stage 6, emit a compact **Actionable Findings** summary for callers:
+After Stage 6 **in default mode**, emit a compact **Actionable Findings** summary for callers:
 
 - List each actionable finding (`gated_auto` or `manual` with `downstream-resolver`) with stable `#`, severity, file:line, title, `autofix_class`, whether `suggested_fix` is present, and `confidence`.
 - Include the run-artifact path when one was written: `/tmp/compound-engineering/ce-code-review/<run-id>/`
 - When the actionable queue is empty, state `Actionable findings: none.` explicitly.
+
+In `mode:agent` do **not** emit this markdown summary — the actionable findings are carried solely by the `actionable_findings` field of the JSON object. Emit nothing after the JSON object, so the response stays a single parseable JSON value.
 
 Do not run post-review triage (no per-finding walk-through, bulk ticket filing, or routing questions). The report and summary are the complete handoff.
 

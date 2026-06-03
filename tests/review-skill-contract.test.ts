@@ -37,9 +37,10 @@ describe("ce-code-review contract", () => {
   test("documents agent mode contract for programmatic callers", async () => {
     const content = await readRepoFile("plugins/compound-engineering/skills/ce-code-review/SKILL.md")
 
-    // mode:agent is JSON output only — same pipeline as default
+    // mode:agent is report-only (skips Stage 5c apply); same reviewer pipeline as default
     expect(content).toContain("## Operating principles")
-    expect(content).toContain("changes **serialization only**")
+    expect(content).toMatch(/`mode:agent` is \*\*report-only\*\*/i)
+    expect(content).toMatch(/does not change reviewer selection, merge logic, or scope rules/i)
 
     // No blocking prompts (cross-platform)
     expect(content).toContain("Never use `AskUserQuestion`")
