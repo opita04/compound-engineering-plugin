@@ -36,8 +36,12 @@ import { parseFrontmatter } from "../src/utils/frontmatter"
  * 2. REFERENCE INTEGRITY (AGENTS.md "File References in Skills"): every
  *    skill-local path mentioned in a skill's markdown must exist on disk
  *    INSIDE the skill directory. Candidates are (a) relative markdown link
- *    targets and (b) backtick code spans shaped like `references/...`,
- *    `scripts/...`, or `assets/...`. A candidate passes when it resolves
+ *    targets and (b) `references/...`, `scripts/...`, or `assets/...` path
+ *    tokens inside backtick code spans — whether the span IS the path
+ *    (`scripts/run.sh`) or embeds it in a command (`bash scripts/run.sh ARG`,
+ *    `python3 scripts/foo.py <arg>`), so a deleted or renamed script is
+ *    caught even when mentioned only as an executable command. A candidate
+ *    passes when it resolves
  *    inside the skill directory (anchored at the skill root or at the
  *    containing file's directory) AND exists there. Resolution is contained
  *    BEFORE any existence check: a `..` candidate that escapes the skill is
@@ -201,15 +205,26 @@ function extractMarkdownLinkTargets(markdown: string): Located[] {
   return out
 }
 
-/** Extracts backtick code spans shaped like skill-local file paths. */
+/**
+ * Extracts skill-local path tokens (references/, scripts/, assets/) from
+ * backtick code spans. The span may BE the path (`scripts/run.sh`) or embed
+ * it in a command (`bash scripts/run.sh ARG`, `python3 scripts/foo.py <arg>`):
+ * each whitespace-delimited token matching the path shape is extracted, so a
+ * deleted or renamed script is caught even when mentioned only as an
+ * executable command. The token character class excludes template placeholder
+ * characters, so placeholder-bearing path tokens (`scripts/<name>`) are
+ * skipped by construction while placeholder ARGUMENTS after a clean path
+ * token do not suppress it.
+ */
 function extractLocalPathCodeSpans(markdown: string): Located[] {
   const out: Located[] = []
-  const regex = /`([^`\n]+)`/g
+  const spanRegex = /`([^`\n]+)`/g
+  const pathToken = /^(references|scripts|assets)\/[A-Za-z0-9._/-]+$/
   let match: RegExpExecArray | null
-  while ((match = regex.exec(markdown)) !== null) {
-    const span = match[1]
-    if (/^(references|scripts|assets)\/[A-Za-z0-9._/-]+$/.test(span)) {
-      out.push({ lineNumber: lineNumberAt(markdown, match.index), value: span })
+  while ((match = spanRegex.exec(markdown)) !== null) {
+    const lineNumber = lineNumberAt(markdown, match.index)
+    for (const token of match[1].split(/\s+/)) {
+      if (pathToken.test(token)) out.push({ lineNumber, value: token })
     }
   }
   return out
@@ -563,9 +578,35 @@ describe("extractLocalPathCodeSpans", () => {
     ])
   })
 
-  test("ignores bare filenames, commands with arguments, and home paths", () => {
+  test("extracts path tokens embedded in command spans", () => {
     const sample =
-      "see `walkthrough.md`, run `bash scripts/run.sh ARG`, store in `~/coding-tutor-tutorials/x.md`, use `/tmp/scratch`"
+      "Run `bash scripts/run.sh ARG`, then `python3 scripts/extract.py --out report.json`."
+    expect(extractLocalPathCodeSpans(sample).map((s) => s.value)).toEqual([
+      "scripts/run.sh",
+      "scripts/extract.py",
+    ])
+  })
+
+  test("placeholder arguments do not suppress a clean path token", () => {
+    expect(extractLocalPathCodeSpans("run `python3 scripts/validate.py <output-path>`").map((s) => s.value)).toEqual([
+      "scripts/validate.py",
+    ])
+  })
+
+  test("skips placeholder-bearing path tokens", () => {
+    expect(extractLocalPathCodeSpans("invoked via `bash scripts/<name>`")).toEqual([])
+    expect(extractLocalPathCodeSpans("read `references/${topic}.md`")).toEqual([])
+  })
+
+  test("extracts multiple path tokens from one span", () => {
+    expect(
+      extractLocalPathCodeSpans("run `cp references/template.md assets/copy.md`").map((s) => s.value),
+    ).toEqual(["references/template.md", "assets/copy.md"])
+  })
+
+  test("ignores bare filenames, home paths, and absolute paths", () => {
+    const sample =
+      "see `walkthrough.md`, store in `~/coding-tutor-tutorials/x.md`, use `/tmp/scratch`, ls `the scripts/ dir`"
     expect(extractLocalPathCodeSpans(sample)).toEqual([])
   })
 })
@@ -623,8 +664,9 @@ describe("findSelfContainmentViolations", () => {
 })
 
 describe("extractLocalReferenceCandidates", () => {
-  test("collects relative link targets and path-shaped spans, stripping fragments", () => {
-    const sample = "[guide](references/guide.md#setup)\nRead `references/foo.md` and `scripts/run.sh`."
+  test("collects relative link targets and span path tokens (bare and command-embedded), stripping fragments", () => {
+    const sample =
+      "[guide](references/guide.md#setup)\nRead `references/foo.md` and run `bash scripts/run.sh <ARG>`."
     expect(extractLocalReferenceCandidates(sample).map((c) => c.value)).toEqual([
       "references/guide.md",
       "references/foo.md",
