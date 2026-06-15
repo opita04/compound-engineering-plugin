@@ -1,79 +1,85 @@
-import { readFileSync } from "fs"
+import { existsSync, readFileSync } from "fs"
 import path from "path"
 import { describe, expect, test } from "bun:test"
 
-const SKILL_PATH = path.join(
+const SKILL_DIR = path.join(
   process.cwd(),
-  "plugins/compound-engineering/skills/ce-worktree/SKILL.md",
+  "plugins/compound-engineering/skills/ce-worktree",
 )
-const SKILL_BODY = readFileSync(SKILL_PATH, "utf8")
+const SKILL_BODY = readFileSync(path.join(SKILL_DIR, "SKILL.md"), "utf8")
 
 describe("ce-worktree SKILL.md", () => {
-  // Regression guard for https://github.com/EveryInc/compound-engineering-plugin/issues/764.
-  //
-  // The runtime Bash tool runs from the user's project CWD, not the skill
-  // directory — so `bash scripts/worktree-manager.sh` resolves against the
-  // user's project root, where the script does not exist, and fails with
-  // "No such file or directory". The fix is to invoke via
-  // `${CLAUDE_SKILL_DIR}` so the path resolves to the skill's own scripts
-  // directory across both marketplace-cached installs and `claude --plugin-dir`
-  // local development.
-  test("does not invoke worktree-manager.sh via a bare relative path", () => {
-    const codeFenceMatches = SKILL_BODY.match(/^bash scripts\/worktree-manager\.sh/gm)
+  // Issue #946: ce-worktree was re-architected from a script-based creator into
+  // a portable isolation guardrail. There must be no bundled script (it was the
+  // root cause of the #943/#764 path-resolution bug class) and no dependence on
+  // ${CLAUDE_SKILL_DIR}, so the skill works verbatim on every target.
+  test("ships no bundled script and no ${CLAUDE_SKILL_DIR} dependence", () => {
     expect(
-      codeFenceMatches,
-      "ce-worktree/SKILL.md re-introduced the bare 'bash scripts/worktree-manager.sh' antipattern — use 'bash \"${CLAUDE_SKILL_DIR}/scripts/worktree-manager.sh\"' instead. Bare relative paths fail at runtime because the Bash tool's CWD is the user's project, not the skill directory.",
-    ).toBeNull()
+      existsSync(path.join(SKILL_DIR, "scripts")),
+      "ce-worktree must not bundle a scripts/ directory — it is now a portable inline-git guardrail (issue #946). A bundled script reintroduces the cross-platform path-resolution bug class (#943/#764).",
+    ).toBe(false)
+    expect(
+      SKILL_BODY.includes("CLAUDE_SKILL_DIR"),
+      "ce-worktree/SKILL.md must not reference ${CLAUDE_SKILL_DIR} — the guardrail uses inline git only, so it resolves on every platform without a skill-dir variable.",
+    ).toBe(false)
+    expect(
+      SKILL_BODY.includes("worktree-manager.sh"),
+      "ce-worktree/SKILL.md must not reference the removed worktree-manager.sh script.",
+    ).toBe(false)
   })
 
-  test("instructs the agent to invoke worktree-manager.sh via a CLAUDE_SKILL_DIR-prefixed path", () => {
-    // Allow either `${CLAUDE_SKILL_DIR}` or `${CLAUDE_SKILL_DIR:-.}` (the
-    // cross-platform fallback form); both resolve correctly on Claude Code.
-    const skillDirPrefixed = /bash "\$\{CLAUDE_SKILL_DIR(?::-[^}]*)?\}\/scripts\/worktree-manager\.sh"/
-    expect(
-      skillDirPrefixed.test(SKILL_BODY),
-      "ce-worktree/SKILL.md must instruct the agent to run 'bash \"${CLAUDE_SKILL_DIR}/scripts/worktree-manager.sh\"' (or with a :- fallback) — relative paths fail at runtime because the Bash tool's CWD is the user's project, not the skill directory.",
-    ).toBe(true)
-  })
-
-  // Regression guard for the cross-platform portability concern raised on
-  // PR #772. ce-worktree has no `ce_platforms` restriction, so it is exported
-  // to Codex/Gemini/Pi/etc. via filterSkillsByPlatform; none of those
-  // converters substitute `${CLAUDE_SKILL_DIR}`. Without a `:-` fallback,
-  // the variable expands to empty on those targets and `bash
-  // "/scripts/worktree-manager.sh"` fails. The `:-.` fallback yields the
-  // original bare-relative path (preserving prior behavior on those
-  // platforms) while Claude Code still gets the resolved skill directory.
-  test("uses a :- fallback so non-Claude targets get the bare relative path", () => {
-    expect(
-      SKILL_BODY.includes(`\${CLAUDE_SKILL_DIR:-.}/scripts/worktree-manager.sh`),
-      "ce-worktree/SKILL.md must use the `${CLAUDE_SKILL_DIR:-.}` fallback form so non-Claude targets (Codex, Gemini, Pi, etc.) — where the env var is unset — fall back to the bare relative path rather than expanding to '/scripts/worktree-manager.sh'.",
-    ).toBe(true)
-  })
-
-  // Regression guard: each script invocation is `bash <abs-path>` at runtime,
-  // which does not match the user's typical allow rules (most have
-  // `Bash(bash -c:*)` at most, not `Bash(bash:*)`). Without `allowed-tools`
-  // granting permission for the specific script, users without
-  // `defaultMode: bypassPermissions` get an approval prompt every time they
-  // run the skill. The pattern is pinned to the script filename —
-  // `Bash(bash *)` would be too broad.
-  test("declares a narrow allowed-tools pattern for worktree-manager.sh", () => {
+  // The guardrail must be portable to every target, so it must NOT gate itself
+  // to Claude only. (Absence of the worktree-manager.sh allowed-tools pin is
+  // covered by the whole-file check above.)
+  test("is portable: no ce_platforms gate", () => {
     const frontmatter = SKILL_BODY.match(/^---\n([\s\S]*?)\n---/)
     expect(frontmatter, "ce-worktree/SKILL.md must have YAML frontmatter").not.toBeNull()
-    const allowedTools = frontmatter![1].match(/^allowed-tools:\s*(.+)$/m)
     expect(
-      allowedTools,
-      "ce-worktree/SKILL.md must declare `allowed-tools:` so users without bypassPermissions don't get a prompt every run.",
-    ).not.toBeNull()
-    const tools = allowedTools![1]
+      /^ce_platforms:/m.test(frontmatter![1]),
+      "ce-worktree/SKILL.md must not declare `ce_platforms` — the inline-git guardrail is portable to all targets (issue #946).",
+    ).toBe(false)
+  })
+
+  // The core value of the skill is the isolation-discipline judgment. Guard the
+  // three load-bearing behaviors so they cannot silently regress.
+  test("detects existing isolation before creating a worktree", () => {
     expect(
-      tools.includes(`Bash(bash *worktree-manager.sh)`),
-      `ce-worktree/SKILL.md allowed-tools must include 'Bash(bash *worktree-manager.sh)' so the runtime Bash call passes the permission check without granting blanket Bash access (got: ${tools})`,
+      SKILL_BODY.includes("git rev-parse --git-common-dir"),
+      "ce-worktree/SKILL.md must compare against --git-common-dir to detect an existing linked worktree (Step 0).",
+    ).toBe(true)
+    // Must compare RESOLVED ABSOLUTE paths, not raw `git rev-parse` output:
+    // from a subdirectory of a normal checkout, --git-dir is absolute while
+    // --git-common-dir may be relative, so a raw string compare gives a false
+    // "already isolated". Guard the canonicalized form so that can't regress.
+    expect(
+      SKILL_BODY.includes("--absolute-git-dir"),
+      "ce-worktree/SKILL.md must compare the resolved absolute git dir (`--absolute-git-dir`) so a subdirectory CWD in a normal checkout is not misread as an existing worktree.",
     ).toBe(true)
     expect(
-      /Bash\(bash \*\)/.test(tools),
-      `ce-worktree/SKILL.md allowed-tools must NOT use the broad 'Bash(bash *)' pattern — pin to the script filename instead (got: ${tools})`,
-    ).toBe(false)
+      SKILL_BODY.includes("git rev-parse --show-superproject-working-tree"),
+      "ce-worktree/SKILL.md must include the submodule guard (--show-superproject-working-tree) so a submodule is not mistaken for a worktree.",
+    ).toBe(true)
+    expect(
+      /work in place/i.test(SKILL_BODY),
+      "ce-worktree/SKILL.md must instruct the agent to work in place when already isolated, rather than nesting a worktree.",
+    ).toBe(true)
+  })
+
+  test("prefers the harness's native worktree tool before the git fallback", () => {
+    expect(
+      /native worktree (primitive|tool)/i.test(SKILL_BODY),
+      "ce-worktree/SKILL.md must instruct the agent to prefer the harness's native worktree tool before falling back to git (avoids phantom state).",
+    ).toBe(true)
+  })
+
+  test("documents an inline git fallback under .worktrees with gitignore safety", () => {
+    expect(
+      SKILL_BODY.includes("git worktree add"),
+      "ce-worktree/SKILL.md must document the inline `git worktree add` fallback.",
+    ).toBe(true)
+    expect(
+      SKILL_BODY.includes("git check-ignore"),
+      "ce-worktree/SKILL.md must verify `.worktrees` is gitignored before creating a worktree, so its contents are never committed.",
+    ).toBe(true)
   })
 })
