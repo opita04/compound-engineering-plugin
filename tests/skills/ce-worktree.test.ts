@@ -78,8 +78,8 @@ describe("ce-worktree SKILL.md", () => {
       "ce-worktree/SKILL.md must document the inline `git worktree add` fallback.",
     ).toBe(true)
     expect(
-      SKILL_BODY.includes("git check-ignore"),
-      "ce-worktree/SKILL.md must verify `.worktrees` is gitignored before creating a worktree, so its contents are never committed.",
+      SKILL_BODY.includes("git check-ignore -q .worktrees/"),
+      "ce-worktree/SKILL.md must probe `git check-ignore -q .worktrees/` WITH the trailing slash, so an existing directory-only `.worktrees/` ignore rule is honored and the skill doesn't redundantly dirty `.gitignore` (PR #948 review).",
     ).toBe(true)
   })
 
