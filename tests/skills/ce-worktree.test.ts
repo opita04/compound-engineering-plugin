@@ -98,6 +98,16 @@ describe("ce-worktree SKILL.md", () => {
     ).toBe(true)
   })
 
+  // PR #948 review: `git fetch origin <branch>` exits 128 with no `origin`
+  // remote / a local-only base. The fetch must be non-fatal so the flow
+  // continues to the local-ref fallback it claims to handle.
+  test("treats the base-branch fetch as best-effort / non-fatal", () => {
+    expect(
+      /non-fatal|best-effort/i.test(SKILL_BODY),
+      "ce-worktree/SKILL.md must mark the `git fetch` step non-fatal so an absent `origin` remote falls through to the local base ref instead of aborting.",
+    ).toBe(true)
+  })
+
   // PR #948 review: on a sandbox/permission failure the requested isolation was
   // not created. The skill must not silently fall back to the current checkout —
   // the user chose isolation specifically to avoid touching it.
