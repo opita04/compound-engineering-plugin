@@ -113,6 +113,37 @@ def get_last_timestamp(filepath, size):
     return None
 
 
+def _pi_active_path_objects(objects):
+    """Return only entries on Pi's active leaf-to-root path.
+
+    Pi session files are append-only trees. The final non-session entry is the
+    active leaf; abandoned branches remain in the file but are not in context.
+    """
+    by_id = {
+        obj.get("id"): obj
+        for obj in objects
+        if isinstance(obj.get("id"), str) and obj.get("type") != "session"
+    }
+    leaf_id = None
+    for obj in objects:
+        if obj.get("type") != "session" and isinstance(obj.get("id"), str):
+            leaf_id = obj["id"]
+    if not leaf_id:
+        return objects
+
+    active_ids = set()
+    current = leaf_id
+    while isinstance(current, str) and current and current not in active_ids:
+        active_ids.add(current)
+        parent = by_id.get(current, {}).get("parentId")
+        current = parent if isinstance(parent, str) else None
+    return [
+        obj
+        for obj in objects
+        if obj.get("type") == "session" or obj.get("id") in active_ids
+    ]
+
+
 def _extract_user_assistant_text(filepath):
     """Return concatenated user + assistant text content from a session JSONL.
 
@@ -126,88 +157,96 @@ def _extract_user_assistant_text(filepath):
     """
     chunks = []
     try:
+        objects = []
         with open(filepath, "r", errors="replace") as f:
             for line in f:
                 try:
-                    obj = json.loads(line.strip())
+                    objects.append(json.loads(line.strip()))
                 except (json.JSONDecodeError, ValueError):
                     continue
 
-                # Claude Code: type-tagged top-level
-                t = obj.get("type")
-                if t == "user":
-                    msg = obj.get("message", {})
-                    content = msg.get("content")
-                    if isinstance(content, str):
-                        chunks.append(content)
-                    elif isinstance(content, list):
-                        for block in content:
-                            if isinstance(block, dict) and block.get("type") == "text":
-                                chunks.append(block.get("text", ""))
-                            # Skip tool_result blocks — tool outputs are not user content.
-                    continue
-                if t == "assistant":
-                    msg = obj.get("message", {})
-                    content = msg.get("content", [])
-                    if isinstance(content, list):
-                        for block in content:
-                            if isinstance(block, dict) and block.get("type") == "text":
-                                chunks.append(block.get("text", ""))
-                            # Skip tool_use and thinking blocks.
-                    continue
+        is_pi = any(
+            obj.get("type") == "session" and "cwd" in obj for obj in objects
+        )
+        if is_pi:
+            objects = _pi_active_path_objects(objects)
 
-                # Codex: payload-typed events
-                if t == "event_msg":
-                    p = obj.get("payload", {})
-                    if p.get("type") == "user_message":
-                        # Strip Codex/Conductor `<system_instruction>...</system_instruction>`
-                        # wrapper before counting. Without this, generic wrapper terms
-                        # (e.g., "Conductor", environment labels) false-match against
-                        # boilerplate the user did not author. Mirrors the same split
-                        # used in ce-session-extract/scripts/extract-skeleton.py.
-                        msg = p.get("message", "")
-                        if isinstance(msg, str):
-                            parts = msg.split("</system_instruction>")
-                            chunks.append(parts[-1] if parts else msg)
-                    continue
-                if t == "response_item":
-                    p = obj.get("payload", {})
-                    if p.get("type") == "message" and p.get("role") == "assistant":
-                        for block in p.get("content", []):
-                            if isinstance(block, dict) and block.get("type") == "output_text":
-                                chunks.append(block.get("text", ""))
-                    continue
-
-                # Pi: type='message' envelope with AgentMessage under message.
-                if t == "message" and "message" in obj:
-                    msg = obj.get("message", {})
-                    role = msg.get("role", "")
-                    if role == "bashExecution":
-                        command = msg.get("command", "")
-                        if isinstance(command, str):
-                            chunks.append(command)
-                        # Search command text only. Output is tool output and can
-                        # be large/noisy in the same way as toolResult content.
-                        continue
-                    if role not in ("user", "assistant"):
-                        continue
-                    content = msg.get("content", [])
-                    if isinstance(content, str):
-                        chunks.append(content)
-                    elif isinstance(content, list):
-                        for block in content:
-                            if isinstance(block, dict) and block.get("type") == "text":
-                                chunks.append(block.get("text", ""))
-                            # Skip thinking, toolCall, and toolResult blocks.
-                    continue
-
-                # Cursor: role-tagged with no top-level type
-                if obj.get("role") in ("user", "assistant") and "type" not in obj:
-                    msg = obj.get("message", {})
-                    for block in msg.get("content", []) if isinstance(msg.get("content"), list) else []:
+        for obj in objects:
+            # Claude Code: type-tagged top-level
+            t = obj.get("type")
+            if t == "user":
+                msg = obj.get("message", {})
+                content = msg.get("content")
+                if isinstance(content, str):
+                    chunks.append(content)
+                elif isinstance(content, list):
+                    for block in content:
                         if isinstance(block, dict) and block.get("type") == "text":
                             chunks.append(block.get("text", ""))
+                        # Skip tool_result blocks — tool outputs are not user content.
+                continue
+            if t == "assistant":
+                msg = obj.get("message", {})
+                content = msg.get("content", [])
+                if isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            chunks.append(block.get("text", ""))
+                        # Skip tool_use and thinking blocks.
+                continue
+
+            # Codex: payload-typed events
+            if t == "event_msg":
+                p = obj.get("payload", {})
+                if p.get("type") == "user_message":
+                    # Strip Codex/Conductor `<system_instruction>...</system_instruction>`
+                    # wrapper before counting. Without this, generic wrapper terms
+                    # (e.g., "Conductor", environment labels) false-match against
+                    # boilerplate the user did not author. Mirrors the same split
+                    # used in ce-session-extract/scripts/extract-skeleton.py.
+                    msg = p.get("message", "")
+                    if isinstance(msg, str):
+                        parts = msg.split("</system_instruction>")
+                        chunks.append(parts[-1] if parts else msg)
+                continue
+            if t == "response_item":
+                p = obj.get("payload", {})
+                if p.get("type") == "message" and p.get("role") == "assistant":
+                    for block in p.get("content", []):
+                        if isinstance(block, dict) and block.get("type") == "output_text":
+                            chunks.append(block.get("text", ""))
+                continue
+
+            # Pi: type='message' envelope with AgentMessage under message.
+            if t == "message" and "message" in obj:
+                msg = obj.get("message", {})
+                role = msg.get("role", "")
+                if role == "bashExecution":
+                    command = msg.get("command", "")
+                    if isinstance(command, str):
+                        chunks.append(command)
+                    # Search command text only. Output is tool output and can
+                    # be large/noisy in the same way as toolResult content.
                     continue
+                if role not in ("user", "assistant"):
+                    continue
+                content = msg.get("content", [])
+                if isinstance(content, str):
+                    chunks.append(content)
+                elif isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            chunks.append(block.get("text", ""))
+                        # Skip thinking, toolCall, and toolResult blocks.
+                continue
+
+            # Cursor: role-tagged with no top-level type
+            if obj.get("role") in ("user", "assistant") and "type" not in obj:
+                msg = obj.get("message", {})
+                for block in msg.get("content", []) if isinstance(msg.get("content"), list) else []:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        chunks.append(block.get("text", ""))
+                continue
     except (OSError, IOError):
         pass
     return "\n".join(chunks)

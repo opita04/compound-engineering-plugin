@@ -101,6 +101,33 @@ def _pi_content_summary(content):
     return summarize_error(content)
 
 
+def _pi_active_path_objects(objects):
+    """Return only entries on Pi's active leaf-to-root path."""
+    by_id = {
+        obj.get("id"): obj
+        for obj in objects
+        if isinstance(obj.get("id"), str) and obj.get("type") != "session"
+    }
+    leaf_id = None
+    for obj in objects:
+        if obj.get("type") != "session" and isinstance(obj.get("id"), str):
+            leaf_id = obj["id"]
+    if not leaf_id:
+        return objects
+
+    active_ids = set()
+    current = leaf_id
+    while isinstance(current, str) and current and current not in active_ids:
+        active_ids.add(current)
+        parent = by_id.get(current, {}).get("parentId")
+        current = parent if isinstance(parent, str) else None
+    return [
+        obj
+        for obj in objects
+        if obj.get("type") == "session" or obj.get("id") in active_ids
+    ]
+
+
 def handle_pi(obj):
     if obj.get("type") != "message":
         return
@@ -171,10 +198,20 @@ def handle_noop(obj):
 handlers = {"claude": handle_claude, "codex": handle_codex, "cursor": handle_noop, "pi": handle_pi}
 handler = handlers.get(detected, handle_noop)
 
+objects = []
 for line in buffer:
     try:
-        handler(json.loads(line))
+        objects.append(json.loads(line))
     except (json.JSONDecodeError, KeyError):
+        stats["parse_errors"] += 1
+
+if detected == "pi":
+    objects = _pi_active_path_objects(objects)
+
+for obj in objects:
+    try:
+        handler(obj)
+    except KeyError:
         stats["parse_errors"] += 1
 
 print(json.dumps({"_meta": True, **stats}))

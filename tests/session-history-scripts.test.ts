@@ -40,6 +40,80 @@ function parseJsonLines(output: string): any[] {
     .map((l) => JSON.parse(l))
 }
 
+function createBranchedPiSession(): string {
+  const lines = [
+    {
+      type: "session",
+      version: 3,
+      id: "test-pi-branched-session",
+      timestamp: "2026-04-07T09:00:00.000Z",
+      cwd: "/Users/test/Code/my-repo",
+    },
+    {
+      type: "message",
+      id: "root-user",
+      parentId: null,
+      timestamp: "2026-04-07T09:01:00.000Z",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "fix the shared auth flow" }],
+        timestamp: 1775542860000,
+      },
+    },
+    {
+      type: "message",
+      id: "abandoned-user",
+      parentId: "root-user",
+      timestamp: "2026-04-07T09:02:00.000Z",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "abandoned_branch_keyword only" }],
+        timestamp: 1775542920000,
+      },
+    },
+    {
+      type: "message",
+      id: "abandoned-bash",
+      parentId: "abandoned-user",
+      timestamp: "2026-04-07T09:02:10.000Z",
+      message: {
+        role: "bashExecution",
+        command: "bun test abandoned-branch.test.ts",
+        output: "abandoned branch failed",
+        exitCode: 1,
+        cancelled: false,
+        timestamp: 1775542930000,
+      },
+    },
+    {
+      type: "message",
+      id: "active-user",
+      parentId: "root-user",
+      timestamp: "2026-04-07T09:03:00.000Z",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "active_branch_keyword only" }],
+        timestamp: 1775542980000,
+      },
+    },
+    {
+      type: "message",
+      id: "active-bash",
+      parentId: "active-user",
+      timestamp: "2026-04-07T09:03:10.000Z",
+      message: {
+        role: "bashExecution",
+        command: "bun test active-branch.test.ts",
+        output: "active branch failed",
+        exitCode: 1,
+        cancelled: false,
+        timestamp: 1775542990000,
+      },
+    },
+  ]
+  return `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`
+}
+
 // ---------------------------------------------------------------------------
 // extract-metadata.py
 // ---------------------------------------------------------------------------
@@ -288,6 +362,39 @@ describe("extract-metadata", () => {
         const outputLines = parseJsonLines(outputResult.stdout)
         expect(outputLines.filter((l) => !l._meta).length).toBe(0)
         expect(outputLines.find((l) => l._meta).files_matched).toBe(0)
+      } finally {
+        await fs.promises.rm(tempDir, { recursive: true, force: true })
+      }
+    })
+
+    test("Pi keyword matching only scans the active branch", async () => {
+      const tempDir = await fs.promises.mkdtemp(
+        path.join(os.tmpdir(), "pi-branch-keyword-")
+      )
+      const sessionPath = path.join(tempDir, "pi-branched-session.jsonl")
+
+      try {
+        await fs.promises.writeFile(sessionPath, createBranchedPiSession())
+
+        const activeResult = await runScript("extract-metadata.py", [
+          "--keyword",
+          "active_branch_keyword",
+          sessionPath,
+        ])
+        expect(activeResult.exitCode).toBe(0)
+        const activeLines = parseJsonLines(activeResult.stdout)
+        expect(activeLines.filter((l) => !l._meta).length).toBe(1)
+        expect(activeLines.find((l) => l._meta).files_matched).toBe(1)
+
+        const abandonedResult = await runScript("extract-metadata.py", [
+          "--keyword",
+          "abandoned_branch_keyword",
+          sessionPath,
+        ])
+        expect(abandonedResult.exitCode).toBe(0)
+        const abandonedLines = parseJsonLines(abandonedResult.stdout)
+        expect(abandonedLines.filter((l) => !l._meta).length).toBe(0)
+        expect(abandonedLines.find((l) => l._meta).files_matched).toBe(0)
       } finally {
         await fs.promises.rm(tempDir, { recursive: true, force: true })
       }
@@ -630,6 +737,20 @@ describe("extract-skeleton", () => {
     expect(meta.parse_errors).toBe(0)
   })
 
+  test("filters Pi skeleton extraction to the active branch", async () => {
+    const { stdout, exitCode } = await runScript(
+      "extract-skeleton.py",
+      [],
+      createBranchedPiSession()
+    )
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("fix the shared auth flow")
+    expect(stdout).toContain("active_branch_keyword")
+    expect(stdout).toContain("active-branch.test.ts")
+    expect(stdout).not.toContain("abandoned_branch_keyword")
+    expect(stdout).not.toContain("abandoned-branch.test.ts")
+  })
+
   test("outputs _meta with stats", async () => {
     const fixture = await Bun.file(
       path.join(FIXTURES_DIR, "claude-session.jsonl")
@@ -949,6 +1070,19 @@ describe("extract-errors", () => {
     const meta = JSON.parse(stdout.trim().split("\n").at(-1)!)
     expect(meta.errors_found).toBe(1)
     expect(meta.parse_errors).toBe(0)
+  })
+
+  test("filters Pi error extraction to the active branch", async () => {
+    const { stdout, exitCode } = await runScript(
+      "extract-errors.py",
+      [],
+      createBranchedPiSession()
+    )
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain("active-branch.test.ts")
+    expect(stdout).not.toContain("abandoned-branch.test.ts")
+    const meta = JSON.parse(stdout.trim().split("\n").at(-1)!)
+    expect(meta.errors_found).toBe(1)
   })
 
   test("outputs _meta with error count", async () => {

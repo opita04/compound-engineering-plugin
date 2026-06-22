@@ -280,6 +280,33 @@ def _pi_text_content(content):
     ]
 
 
+def _pi_active_path_objects(objects):
+    """Return only entries on Pi's active leaf-to-root path."""
+    by_id = {
+        obj.get("id"): obj
+        for obj in objects
+        if isinstance(obj.get("id"), str) and obj.get("type") != "session"
+    }
+    leaf_id = None
+    for obj in objects:
+        if obj.get("type") != "session" and isinstance(obj.get("id"), str):
+            leaf_id = obj["id"]
+    if not leaf_id:
+        return objects
+
+    active_ids = set()
+    current = leaf_id
+    while isinstance(current, str) and current and current not in active_ids:
+        active_ids.add(current)
+        parent = by_id.get(current, {}).get("parentId")
+        current = parent if isinstance(parent, str) else None
+    return [
+        obj
+        for obj in objects
+        if obj.get("type") == "session" or obj.get("id") in active_ids
+    ]
+
+
 def handle_pi(obj):
     """Pi sessions: type='message' with message.role and content blocks."""
     if obj.get("type") != "message":
@@ -455,10 +482,20 @@ for line in sys.stdin:
 handlers = {"claude": handle_claude, "codex": handle_codex, "cursor": handle_cursor, "pi": handle_pi}
 handler = handlers.get(detected, handle_codex)
 
+objects = []
 for line in buffer:
     try:
-        handler(json.loads(line))
+        objects.append(json.loads(line))
     except (json.JSONDecodeError, KeyError):
+        stats["parse_errors"] += 1
+
+if detected == "pi":
+    objects = _pi_active_path_objects(objects)
+
+for obj in objects:
+    try:
+        handler(obj)
+    except KeyError:
         stats["parse_errors"] += 1
 
 # Flush any remaining buffered tools
