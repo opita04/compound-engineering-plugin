@@ -370,6 +370,34 @@ describe("extract-metadata", () => {
     expect(sessions[0].cwd).toContain("my-repo")
   })
 
+  test("--cwd-filter excludes sibling Pi repos when given an absolute repo root", async () => {
+    const tempDir = await fs.promises.mkdtemp(
+      path.join(os.tmpdir(), "pi-cwd-filter-")
+    )
+    const sessionPath = path.join(tempDir, "pi-sibling-session.jsonl")
+    const sibling = (await Bun.file(
+      path.join(FIXTURES_DIR, "pi-session.jsonl")
+    ).text()).replace(
+      '"cwd":"/Users/test/Code/my-repo"',
+      '"cwd":"/Users/test/Code/my-repo-old"'
+    )
+
+    try {
+      await fs.promises.writeFile(sessionPath, sibling)
+      const { stdout, exitCode } = await runScript("extract-metadata.py", [
+        "--cwd-filter",
+        "/Users/test/Code/my-repo",
+        sessionPath,
+      ])
+      expect(exitCode).toBe(0)
+      const lines = parseJsonLines(stdout)
+      expect(lines.filter((l) => !l._meta).length).toBe(0)
+      expect(lines.find((l) => l._meta).filtered_by_cwd).toBe(1)
+    } finally {
+      await fs.promises.rm(tempDir, { recursive: true, force: true })
+    }
+  })
+
   test("reports clean zero-file result for empty stdin", async () => {
     const { stdout, exitCode } = await runScript(
       "extract-metadata.py",
@@ -1587,6 +1615,56 @@ describe("discover-sessions", () => {
 
     const { stdout, stderr, exitCode } = await runDiscover(
       ["my-repo", "7", "--platform", "pi"],
+      { HOME: tempHome }
+    )
+
+    expect(exitCode).toBe(0)
+    expect(stderr).toBe("")
+    const files = stdout.trim().split("\n").filter((l) => l.trim())
+    expect(files).toEqual([sessionPath])
+  })
+
+  test("--platform pi with --cwd discovers only the exact encoded CWD directory", async () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "pi-home-"))
+    const sessionPath = path.join(
+      tempHome,
+      ".pi/agent/sessions/--Users-test-Code-my-repo--/2026-04-07T09-00-00-000Z_test.jsonl"
+    )
+    const siblingPath = path.join(
+      tempHome,
+      ".pi/agent/sessions/--Users-test-Code-my-repo-old--/2026-04-07T09-00-00-000Z_test.jsonl"
+    )
+    await writeFixture(sessionPath, "pi-session.jsonl")
+    await writeFixture(siblingPath, "pi-session.jsonl")
+
+    const { stdout, stderr, exitCode } = await runDiscover(
+      [
+        "my-repo",
+        "7",
+        "--cwd",
+        "/Users/test/Code/my-repo",
+        "--platform",
+        "pi",
+      ],
+      { HOME: tempHome }
+    )
+
+    expect(exitCode).toBe(0)
+    expect(stderr).toBe("")
+    const files = stdout.trim().split("\n").filter((l) => l.trim())
+    expect(files).toEqual([sessionPath])
+  })
+
+  test("--cwd works without an explicit --platform flag", async () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "pi-home-"))
+    const sessionPath = path.join(
+      tempHome,
+      ".pi/agent/sessions/--Users-test-Code-my-repo--/2026-04-07T09-00-00-000Z_test.jsonl"
+    )
+    await writeFixture(sessionPath, "pi-session.jsonl")
+
+    const { stdout, stderr, exitCode } = await runDiscover(
+      ["my-repo", "7", "--cwd", "/Users/test/Code/my-repo"],
       { HOME: tempHome }
     )
 

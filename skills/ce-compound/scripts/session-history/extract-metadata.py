@@ -365,6 +365,14 @@ def process_file(filepath):
         return None, filepath
 
 
+def cwd_matches_filter(session_cwd, cwd_filter):
+    if not session_cwd or not cwd_filter:
+        return True
+    if os.path.isabs(cwd_filter):
+        return os.path.normpath(session_cwd) == os.path.normpath(cwd_filter)
+    return cwd_filter in session_cwd
+
+
 # Parse arguments: files and optional --cwd-filter / --keyword
 files = []
 cwd_filter = None
@@ -401,7 +409,7 @@ if files:
             # scan cost — Codex discovery returns sessions across all repos,
             # so without this ordering --keyword would scan files that are
             # immediately discarded.
-            if cwd_filter and result.get("cwd") and cwd_filter not in result["cwd"]:
+            if cwd_filter and result.get("cwd") and not cwd_matches_filter(result["cwd"], cwd_filter):
                 filtered += 1
                 continue
             # Apply keyword scan only after cheap filters pass.

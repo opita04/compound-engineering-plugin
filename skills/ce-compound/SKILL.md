@@ -237,7 +237,7 @@ Launch research subagents. Each returns text data to the orchestrator.
      REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
      REPO_NAME=$(basename "$REPO_ROOT")
      SCAN_DAYS="7"
-     bash "${CLAUDE_SKILL_DIR}/scripts/session-history/discover-sessions.sh" "$REPO_NAME" "$SCAN_DAYS" | tr '\n' '\0' | xargs -0 python3 "${CLAUDE_SKILL_DIR}/scripts/session-history/extract-metadata.py" --cwd-filter "$REPO_ROOT"
+     bash "${CLAUDE_SKILL_DIR}/scripts/session-history/discover-sessions.sh" "$REPO_NAME" "$SCAN_DAYS" --cwd "$REPO_ROOT" | tr '\n' '\0' | xargs -0 python3 "${CLAUDE_SKILL_DIR}/scripts/session-history/extract-metadata.py" --cwd-filter "$REPO_ROOT"
    else
      echo "Session history was requested, but this platform did not expose the bundled session-history scripts to the runtime."
    fi
