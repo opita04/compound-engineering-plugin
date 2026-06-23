@@ -116,7 +116,7 @@ describe("unified plan artifact contract", () => {
     expect(ceWork).toContain("Any other readiness value")
     expect(ceWork).toContain("Build a section map")
     expect(ceWork).toContain("Do not send \"read the whole plan\"")
-    expect(ceWork).toContain("mode:caller-owned-tail <plan-path>")
+    expect(ceWork).toContain("mode:return-to-caller <plan-path>")
     expect(ceWork).toContain("standalone_shipping_skipped: true")
     expect(ceWork).not.toContain("artifact_readiness: approach-plan")
 
@@ -125,12 +125,12 @@ describe("unified plan artifact contract", () => {
     expect(ceWorkBeta).toContain("requirements-only")
   })
 
-  test("lfg delegates implementation to ce-work caller-owned-tail mode", () => {
+  test("lfg delegates implementation to ce-work return-to-caller mode", () => {
     expect(lfg).toContain("artifact_readiness: implementation-ready")
     expect(lfg).toContain("execution: code")
     expect(lfg).toContain("any unrecognized readiness value")
     expect(lfg).toContain("LFG never launches `/goal` directly")
-    expect(lfg).toContain("mode:caller-owned-tail <plan-path-from-step-1>")
+    expect(lfg).toContain("mode:return-to-caller <plan-path-from-step-1>")
     expect(lfg).toContain("standalone_shipping_skipped: true")
     expect(lfg).toContain("ce-code-review` skill with `mode:agent plan:<plan-path-from-step-1>`")
     expect(lfg).not.toContain("artifact_readiness: approach-plan")
@@ -213,10 +213,12 @@ describe("unified plan artifact contract", () => {
     expect(planSkill).toContain("the local plan file stays canonical")
   })
 
-  test("ce-work Phase 0 parses the caller-owned-tail mode token before triage", () => {
-    // Codex #972 P1: lfg passes `mode:caller-owned-tail <plan-path>`; ce-work
+  test("ce-work Phase 0 parses the return-to-caller mode token before triage", () => {
+    // Codex #972 P1: lfg passes `mode:return-to-caller <plan-path>`; ce-work
     // must strip the mode token, not treat the whole string as a bare prompt.
-    expect(ceWork).toMatch(/begins with `mode:caller-owned-tail`/i)
+    expect(ceWork).toMatch(/begins with `mode:return-to-caller`/i)
+    // legacy alias still recognized so an old reference doesn't break.
+    expect(ceWork).toMatch(/legacy aliases `mode:caller-owned-tail`/i)
     expect(ceWork).toMatch(/strip that token/i)
     expect(ceWork).toContain("after any mode token is stripped")
   })

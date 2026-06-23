@@ -15,9 +15,9 @@ When invoking any skill referenced below, resolve its name against the available
 
    Read the plan metadata before continuing. If the plan has `artifact_contract: ce-unified-plan/v1`, proceed only when it has `artifact_readiness: implementation-ready` and `execution: code`. Stop the pipeline for `artifact_readiness: requirements-only`, any unrecognized readiness value, `execution: knowledge-work`, approach-plan outputs, answer-seeking/universal outputs, or invalid progress-like readiness values. LFG never launches `/goal` directly; when goal-mode or dynamic workflows are appropriate, `ce-work` owns that implementation engine choice and must return control to LFG afterward.
 
-2. Invoke the `ce-work` skill with `mode:caller-owned-tail <plan-path-from-step-1>`.
+2. Invoke the `ce-work` skill with `mode:return-to-caller <plan-path-from-step-1>`.
 
-   GATE: STOP. Verify that implementation work was performed - files were created or modified beyond the plan. Read the structured return and require `status: complete`, the same plan path, changed files, U-IDs attempted/completed when present, verification results, blocker list, behavior-change signal, and `standalone_shipping_skipped: true`. Do NOT proceed to step 3 if no code changes were made or if ce-work did not return control in caller-owned-tail mode.
+   GATE: STOP. Verify that implementation work was performed - files were created or modified beyond the plan. Read the structured return and require `status: complete`, the same plan path, changed files, U-IDs attempted/completed when present, verification results, blocker list, behavior-change signal, and `standalone_shipping_skipped: true`. Do NOT proceed to step 3 if no code changes were made or if ce-work did not return control in return-to-caller mode.
 
 3. Invoke the `ce-simplify-code` skill on the branch diff.
 

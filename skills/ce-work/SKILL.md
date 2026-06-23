@@ -20,7 +20,7 @@ This command takes a work document (plan or specification) or a bare prompt desc
 
 ### Phase 0: Input Triage
 
-**First, parse a leading mode token.** If `<input_document>` begins with `mode:caller-owned-tail` (or the equivalent `caller:lfg`), strip that token before anything else: the remainder of the string is the plan path, and this run executes in **Caller-Owned Tail Mode** (see § Caller-Owned Tail Mode) — implement and locally verify only, then return the structured envelope instead of running the standalone shipping tail. Classify the stripped plan path with the rules below. A mode token with no following path is an error: report it rather than treating `mode:caller-owned-tail` as a bare prompt.
+**First, parse a leading mode token.** If `<input_document>` begins with `mode:return-to-caller` (or the legacy aliases `mode:caller-owned-tail` / `caller:lfg`), strip that token before anything else: the remainder of the string is the plan path, and this run executes in **Return-to-Caller Mode** (see § Return-to-Caller Mode) — implement and locally verify only, then return the structured envelope instead of running the standalone shipping tail. Classify the stripped plan path with the rules below. A mode token with no following path is an error: report it rather than treating `mode:return-to-caller` as a bare prompt.
 
 Determine how to proceed based on what was provided in `<input_document>` (after any mode token is stripped).
 
@@ -141,7 +141,7 @@ Determine how to proceed based on what was provided in `<input_document>` (after
 
 4. **Choose Execution Engine, then Strategy**
 
-   For an implementation-ready unified code plan, first pick the **engine** that runs implementation: inline/subagent (default and only callable engine on Claude Code), goal-mode, or dynamic-workflow. Goal-mode and dynamic-workflow are usable only when the host exposes a callable primitive for them — Codex exposes `create_goal` (a skill can start a goal directly), while Claude Code exposes no goal tools, so on Claude Code they are prompt-emission only (never invoked from inside this skill). Prefer dynamic-workflow over goal-mode for large fan-out plans (many independent U-IDs, codebase-wide sweeps, migrations, adversarial cross-checking). Read `references/execution-engines.md` for the host-capability probe, the plan-shape selection table, the copyable goal-mode/`ultracode:` prompts, and the resume-tail rules. An engine choice never changes tail ownership — after implementation, resume standalone quality gates in normal use, or return the caller-owned-tail envelope when invoked by `lfg`. Legacy and bare-prompt work skip this and use the inline/subagent engine directly.
+   For an implementation-ready unified code plan, first pick the **engine** that runs implementation: inline/subagent (default and only callable engine on Claude Code), goal-mode, or dynamic-workflow. Goal-mode and dynamic-workflow are usable only when the host exposes a callable primitive for them — Codex exposes `create_goal` (a skill can start a goal directly), while Claude Code exposes no goal tools, so on Claude Code they are prompt-emission only (never invoked from inside this skill). Prefer dynamic-workflow over goal-mode for large fan-out plans (many independent U-IDs, codebase-wide sweeps, migrations, adversarial cross-checking). Read `references/execution-engines.md` for the host-capability probe, the plan-shape selection table, the copyable goal-mode/`ultracode:` prompts, and the resume-tail rules. An engine choice never changes tail ownership — after implementation, resume standalone quality gates in normal use, or return the return-to-caller envelope when invoked by `lfg`. Legacy and bare-prompt work skip this and use the inline/subagent engine directly.
 
    For the inline/subagent engine, decide the dispatch **strategy** based on the plan's size and dependency structure:
 
@@ -356,13 +356,13 @@ When all Phase 2 tasks are complete and execution transitions to quality check, 
 2. **Apply fixes** — Load `references/review-findings-followup.md`. Filter eligibility on JSON only, **batch applicable findings by file**, dispatch fix subagents (parallel when file sets are disjoint). The orchestrator merges diffs, runs tests, and commits — it does not pre-investigate findings.
 3. **Residual Work Gate** — Only after followup; unresolved actionable findings go through the gate in `shipping-workflow.md` (autonomous sessions auto-accept + record residuals; interactive sessions ask).
 
-## Caller-Owned Tail Mode
+## Return-to-Caller Mode
 
-`mode:caller-owned-tail <plan-path>` is reserved for orchestrators such as
-`lfg` that own simplification, code review, PR creation, and CI watching after
-implementation. In this mode `ce-work` performs implementation and local
-verification only, then returns a structured summary instead of running the
-standalone shipping tail.
+`mode:return-to-caller <plan-path>` (legacy alias: `mode:caller-owned-tail`) is
+reserved for orchestrators such as `lfg` that own simplification, code review,
+PR creation, and CI watching after implementation. In this mode `ce-work`
+performs implementation and local verification only, then returns a structured
+summary instead of running the standalone shipping tail.
 
 Return:
 
@@ -377,7 +377,7 @@ Return:
 - `standalone_shipping_skipped: true`
 
 Engine selection (`references/execution-engines.md`) still applies in this mode,
-but only for implementation. In caller-owned-tail mode do not emit a copyable
+but only for implementation. In return-to-caller mode do not emit a copyable
 goal/workflow prompt — a manual paste step strands the caller; run
 inline/subagents or return a blocker instead. Any goal/workflow engine used here
 must not open a PR, run the owner workflow tail, or bypass the caller-owned
