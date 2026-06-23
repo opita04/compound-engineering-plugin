@@ -45,7 +45,7 @@ type PluginName = (typeof PLUGIN_NAMES)[number]
 type SourceInventory = {
   agents: string[]
   commands: string[]
-  skills: { name: string; cePlatforms?: string[] }[]
+  skills: { name: string; cePlatforms?: string[]; disableModelInvocation?: boolean; userInvocable?: boolean }[]
 }
 
 function listFileBasenames(dir: string, extension: string): string[] {
@@ -99,7 +99,9 @@ function loadSourceInventory(pluginName: PluginName): SourceInventory {
     }
     const { data } = parseFrontmatter(raw, skillFile)
     const cePlatforms = Array.isArray(data.ce_platforms) ? (data.ce_platforms as string[]) : undefined
-    skills.push({ name, cePlatforms })
+    const disableModelInvocation = data["disable-model-invocation"] === true ? true : undefined
+    const userInvocable = data["user-invocable"] === false ? false : undefined
+    skills.push({ name, cePlatforms, disableModelInvocation, userInvocable })
   }
   return { agents, commands, skills }
 }
@@ -112,6 +114,20 @@ function loadSourceInventory(pluginName: PluginName): SourceInventory {
 function skillsForPlatform(inventory: SourceInventory, target: Target): string[] {
   return inventory.skills
     .filter((skill) => !skill.cePlatforms || skill.cePlatforms.includes(target))
+    .map((skill) => skill.name)
+    .sort()
+}
+
+// Mirrors convertSkillsToCommands (src/converters/claude-to-opencode.ts) on
+// purpose: OpenCode generates one slash-command stub per platform-eligible
+// skill, excluding skills that opt out of model invocation
+// (`disable-model-invocation: true`) or user invocation
+// (`user-invocable: false`). Derived independently from source frontmatter so a
+// regression in either exclusion shows up as a set difference here.
+function commandStubsForPlatform(inventory: SourceInventory, target: Target): string[] {
+  return inventory.skills
+    .filter((skill) => !skill.cePlatforms || skill.cePlatforms.includes(target))
+    .filter((skill) => !skill.disableModelInvocation && skill.userInvocable !== false)
     .map((skill) => skill.name)
     .sort()
 }
@@ -268,6 +284,9 @@ for (const pluginName of PLUGIN_NAMES) {
     test("opencode output matches the source inventory", () => {
       const { root } = getConversion(pluginName, "opencode")
       const expectedSkills = skillsForPlatform(inventory, "opencode")
+      // OpenCode emits one slash-command stub per invocable skill, plus any
+      // explicit commands/ entries (none for the skills-only root plugin).
+      const expectedCommands = [...new Set([...inventory.commands, ...commandStubsForPlatform(inventory, "opencode")])].sort()
 
       const config = readJson(path.join(root, "opencode.json"))
       expect(config.$schema).toBe("https://opencode.ai/config.json")
@@ -277,7 +296,7 @@ for (const pluginName of PLUGIN_NAMES) {
       expect(listFileBasenames(path.join(opencodeRoot, "agents"), ".md")).toEqual(inventory.agents)
       expect(listDirNames(path.join(opencodeRoot, "skills"))).toEqual(expectedSkills)
       expectSkillDirsHaveSkillMd(path.join(opencodeRoot, "skills"), expectedSkills)
-      expect(listFileBasenames(path.join(opencodeRoot, "commands"), ".md")).toEqual(inventory.commands)
+      expect(listFileBasenames(path.join(opencodeRoot, "commands"), ".md")).toEqual(expectedCommands)
 
       const manifest = readJson(path.join(opencodeRoot, pluginName, "install-manifest.json"))
       expect(manifest.version).toBe(1)
@@ -285,7 +304,7 @@ for (const pluginName of PLUGIN_NAMES) {
       const groups = manifest.groups as Record<string, string[]>
       expect(groups.agents.length).toBe(inventory.agents.length)
       expect(groups.skills.length).toBe(expectedSkills.length)
-      expect(groups.commands.length).toBe(inventory.commands.length)
+      expect(groups.commands.length).toBe(expectedCommands.length)
     })
 
     test("codex output matches the source inventory", () => {
