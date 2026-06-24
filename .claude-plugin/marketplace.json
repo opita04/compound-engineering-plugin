@@ -11,11 +11,9 @@
   "plugins": [
     {
       "name": "compound-engineering",
-      "description": "AI-powered development tools that get smarter with every use. Make each unit of engineering work easier than the last.",
+      "description": "Brainstorming, planning, debugging, and autonomous workflows for AI agents",
       "author": {
-        "name": "Kieran Klaassen",
-        "url": "https://github.com/kieranklaassen",
-        "email": "kieran@every.to"
+        "name": "Kieran Klaassen and Trevin Chow"
       },
       "homepage": "https://github.com/EveryInc/compound-engineering-plugin",
       "tags": [
