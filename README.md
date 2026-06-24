@@ -117,6 +117,8 @@ The `compound-engineering` plugin currently ships 27 skills and 0 standalone age
 /plugin install compound-engineering
 ```
 
+> **Already have Compound Engineering installed?** Compound Engineering moved to a root-native layout. You must refresh the marketplace *before* updating — see [Existing Installs](#existing-installs). Running `/plugin update` alone keeps you on the old version.
+
 ### Cursor
 
 In Cursor Agent chat, install from the plugin marketplace:
@@ -265,14 +267,14 @@ agy plugin install ./compound-engineering-plugin/.agy
 
 ### Existing Installs
 
-Marketplace-managed installs should move to the root plugin layout when the marketplace/plugin version updates. On Claude Code, refresh the cached marketplace definition before updating the plugin:
+Compound Engineering moved to a root-native, skills-only layout. An existing marketplace install keeps a **cached** marketplace entry that still points at the old `plugins/compound-engineering` path, so running `/plugin update` on its own reads that stale entry and leaves you on the previous version. On Claude Code, refresh the cached marketplace definition **first**, then update the plugin — order matters:
 
 ```text
 /plugin marketplace update compound-engineering-plugin
 /plugin update compound-engineering
 ```
 
-A plugin update by itself can still read the stale cached marketplace entry that points at the old `plugins/compound-engineering` path. If you configured a host with a direct path or sparse path under `plugins/compound-engineering`, edit or reinstall that source so it points at the repository root with no sparse path.
+If you configured a host with a direct path or sparse path under `plugins/compound-engineering`, edit or reinstall that source so it points at the repository root with no sparse path.
 
 If a previous Bun-installed copy is still shadowing native plugin skills, run the current cleanup command from a checkout of this repository:
 
