@@ -418,9 +418,6 @@ When `delegation_active` is true after argument parsing, read `references/codex-
 
 ### Quality is Built In
 
-- Follow existing patterns
-- Write tests for new code
-- Run linting before pushing
 - Review when Tier 1 is available or Tier 2 criteria match (see `shipping-workflow.md`)
 
 ### Ship Complete Features

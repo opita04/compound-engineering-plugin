@@ -367,9 +367,6 @@ Tier 1 harness-native review may still fix inline; Tier 2 always separates revie
 
 ### Quality is Built In
 
-- Follow existing patterns
-- Write tests for new code
-- Run linting before pushing
 - Review when Tier 1 is available or Tier 2 criteria match (see `shipping-workflow.md`)
 
 ### Ship Complete Features
