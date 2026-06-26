@@ -15,12 +15,12 @@ This is additive, not a replacement for the `adversarial-reviewer` persona. It i
 ```bash
 if [ -n "${CURSOR_AGENT:-}${CURSOR_CONVERSATION_ID:-}" ]; then XHOST=cursor; XPEER=codex
 elif [ "${CLAUDECODE:-}" = "1" ]; then XHOST=claude; XPEER=codex
-elif [ -n "${CODEX_SANDBOX:-}${CODEX_SANDBOX_NETWORK_DISABLED:-}${CODEX_SESSION_ID:-}" ]; then XHOST=codex; XPEER=claude
+elif [ -n "${CODEX_SANDBOX:-}${CODEX_SANDBOX_NETWORK_DISABLED:-}${CODEX_SESSION_ID:-}${CODEX_THREAD_ID:-}${CODEX_CI:-}" ]; then XHOST=codex; XPEER=claude
 else XHOST=unknown; XPEER=""; fi
 echo "XMODEL_HOST: $XHOST  PEER: ${XPEER:-none}"
 ```
 
-Peer mapping: Cursor and Claude both prefer **codex** (a guaranteed different model family/process — Cursor's own model is configurable, so codex is the reliable cross-model peer); Codex prefers **claude**. Each host is matched on its own session signals, with a fallback marker because the primary one is not set in every release/mode: Cursor = `CURSOR_AGENT` or `CURSOR_CONVERSATION_ID`; Claude Code = `CLAUDECODE=1`; Codex = `CODEX_SANDBOX`/`CODEX_SANDBOX_NETWORK_DISABLED` (set by `codex exec -s`) **or** `CODEX_SESSION_ID` (an interactive Codex session may set only the latter — without the fallback, a real Codex session falls through to `unknown` and the pass silently never runs). Presence of the *other* CLI's home (e.g. `CODEX_HOME`) is NOT a host signal — it is exported even inside a Claude session. `unknown` → skip the pass silently. If a new host/release changes these markers, the failure mode is a silent skip, not a wrong peer — verify the markers when adding a host.
+Peer mapping: Cursor and Claude both prefer **codex** (a guaranteed different model family/process — Cursor's own model is configurable, so codex is the reliable cross-model peer); Codex prefers **claude**. Each host is matched on its own session signals, with a fallback marker because the primary one is not set in every release/mode: Cursor = `CURSOR_AGENT` or `CURSOR_CONVERSATION_ID`; Claude Code = `CLAUDECODE=1`; Codex = any of `CODEX_SANDBOX`/`CODEX_SANDBOX_NETWORK_DISABLED` (set by `codex exec -s`), `CODEX_SESSION_ID` (interactive CLI), or `CODEX_THREAD_ID`/`CODEX_CI` (Codex web/API/CI surfaces). Codex exposes different markers per surface and none is universal, so check the union — miss them all and a real Codex session falls through to `unknown` and the pass silently never runs. Presence of the *other* CLI's home (e.g. `CODEX_HOME`) is NOT a host signal — it is exported even inside a Claude session. `unknown` → skip the pass silently. If a new host/release changes these markers, the failure mode is a silent skip, not a wrong peer — verify the markers when adding a host.
 
 ## Step 2 — Peer preflight (installed + authed)
 
