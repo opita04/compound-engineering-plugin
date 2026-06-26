@@ -27,7 +27,6 @@ const ceWorkEngines = readRepoFile(
 const planMarkdownRendering = readRepoFile(
   "skills/ce-plan/references/markdown-rendering.md",
 )
-const ceWorkBeta = readRepoFile("skills/ce-work-beta/SKILL.md")
 const lfg = readRepoFile("skills/lfg/SKILL.md")
 const docReview = readRepoFile("skills/ce-doc-review/SKILL.md")
 const docReviewTemplate = readRepoFile(
@@ -113,7 +112,7 @@ describe("unified plan artifact contract", () => {
     expect(planSkill).toContain("Do not write a launch prompt into the doc")
   })
 
-  test("ce-work and ce-work-beta are readiness-aware before execution", () => {
+  test("ce-work is readiness-aware before execution", () => {
     expect(ceWork).toContain("classify `artifact_readiness` before reading the body")
     expect(ceWork).toContain("requirements-only` -> stop")
     expect(ceWork).toContain("Any other readiness value")
@@ -122,10 +121,6 @@ describe("unified plan artifact contract", () => {
     expect(ceWork).toContain("mode:return-to-caller <plan-path>")
     expect(ceWork).toContain("standalone_shipping_skipped: true")
     expect(ceWork).not.toContain("artifact_readiness: approach-plan")
-
-    expect(ceWorkBeta).toContain("not the primary unified-plan executor")
-    expect(ceWorkBeta).toContain("mirror stable")
-    expect(ceWorkBeta).toContain("requirements-only")
   })
 
   test("lfg delegates implementation to ce-work return-to-caller mode", () => {
