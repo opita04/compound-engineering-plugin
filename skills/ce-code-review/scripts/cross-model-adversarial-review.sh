@@ -168,17 +168,20 @@ PY
   claude)
     # Single-shot output -> hard cap only. Disallowed tools as SEPARATE variadic args
     # (unambiguous; a single quoted "Edit Write NotebookEdit" is risky since tool names
-    # can contain spaces). claude can't write a file under dontAsk + disallowed Write,
-    # so it emits the JSON envelope on stdout (captured to PEERLOG); we extract it.
+    # can contain spaces). We deny the built-in mutators (Edit/Write/NotebookEdit/Bash)
+    # AND `mcp__*` (a user's pre-approved MCP write/deploy tools would otherwise run under
+    # dontAsk) AND `Task` (a subagent would bypass this deny list) -- so the peer stays
+    # read-only even with MCP servers configured. claude can't write a file under those
+    # perms, so it emits the JSON envelope on stdout (captured to PEERLOG); we extract it.
     if [ -n "$TO_BIN" ]; then
       "$TO_BIN" -k 10 "$HARD_SECS" claude -p --model opus --permission-mode dontAsk \
-        --disallowedTools Edit Write NotebookEdit MultiEdit Bash --max-turns 15 --no-session-persistence \
+        --disallowedTools Edit Write NotebookEdit Bash Task 'mcp__*' --max-turns 15 --no-session-persistence \
         --json-schema "$(cat "$SCHEMA")" --output-format json \
         < "$PROMPT_FILE" > "$PEERLOG" 2>/dev/null \
         || log "claude exited non-zero or timed out"
     else
       perl -e 'alarm shift; exec @ARGV' "$HARD_SECS" claude -p --model opus --permission-mode dontAsk \
-        --disallowedTools Edit Write NotebookEdit MultiEdit Bash --max-turns 15 --no-session-persistence \
+        --disallowedTools Edit Write NotebookEdit Bash Task 'mcp__*' --max-turns 15 --no-session-persistence \
         --json-schema "$(cat "$SCHEMA")" --output-format json \
         < "$PROMPT_FILE" > "$PEERLOG" 2>/dev/null \
         || log "claude exited non-zero or timed out"
