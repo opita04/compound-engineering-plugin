@@ -292,6 +292,19 @@ describe("unified plan artifact contract", () => {
     expect(/pipeline mode the resume choice is made automatically|never prompted/i.test(region)).toBe(true)
   })
 
+  test("format conversion: a requirements-only artifact with an implementation-ready sibling is superseded", () => {
+    // Codex P2 (PR #972): a format conversion writes a new canonical .md and
+    // leaves the old .html with stale requirements-only metadata. Both discovery
+    // sites glob .md AND .html, so they could rediscover the stale sibling and
+    // re-enrich (ce-plan) or stop (ce-work) even though the sibling is ready.
+    // Both must skip a requirements-only artifact that has an implementation-ready
+    // same-basename sibling.
+    expect(planSkill).toMatch(/Skip a superseded sibling/i)
+    expect(planSkill).toMatch(/same-basename.*other format|<basename>\.md.*<basename>\.html/i)
+    expect(ceWork).toMatch(/Superseded sibling/i)
+    expect(ceWork).toMatch(/select the implementation-ready sibling and execute it rather than stopping/i)
+  })
+
   test("large plans get a navigation-only Unit Index, gated to ~10+ units", () => {
     expect(planSections).toMatch(/Unit Index \(large plans only/i)
     expect(planSections).toMatch(/ten or more\s+units/i)
