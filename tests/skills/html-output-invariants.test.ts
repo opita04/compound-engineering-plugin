@@ -356,6 +356,16 @@ describe("html-rendering.md reference content invariants", () => {
       /Mandatory directional caption|directional.*not the spec|Directional only/i.test(REFERENCE),
       "Wireframe affordance must require a directional caption.",
     ).toBe(true)
+    // Another-agent P2 (PR #972): brainstorm requirements output is now a
+    // requirements-only unified plan under docs/plans/, so "not plan artifacts"
+    // must mean implementation-ready plans (ce-plan output), NOT exclude the
+    // requirements-only unified plan that ce-brainstorm writes — otherwise HTML
+    // brainstorms for UI changes would suppress the intended wireframe.
+    expect(
+      /requirements-only unified plan/i.test(REFERENCE) &&
+        /not an implementation-ready\s+plan/i.test(REFERENCE),
+      "Wireframe scope must include the requirements-only unified plan and exclude only implementation-ready plans.",
+    ).toBe(true)
   })
 
   test("agent-consumability rules guarantee downstream agents can read HTML", () => {

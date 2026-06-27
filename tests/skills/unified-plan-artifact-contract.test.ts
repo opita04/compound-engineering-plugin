@@ -97,6 +97,23 @@ describe("unified plan artifact contract", () => {
     expect(brainstormHandoff).toMatch(/passing the unified plan artifact path as its\s+argument/i)
     // The skip-planning /goal slot was removed in favor of plan-first lfg.
     expect(brainstormHandoff).not.toContain("skip-planning slot")
+    // The lfg option must be gated on an artifact existing: a brief-alignment
+    // brainstorm can skip doc creation, and lfg's pipeline ce-plan step needs the
+    // artifact path (it cannot prompt) — without one there is nothing to enrich.
+    expect(brainstormHandoff).toMatch(/a unified plan artifact was created/i)
+    expect(brainstormHandoff).toMatch(/with no artifact.*nothing to enrich/i)
+  })
+
+  test("ce-doc-review personas map unified-* document types to their base review lens", () => {
+    // Another-agent P2 (PR #972): persona prompts branch on `Document type:
+    // requirements` / `plan`, but the orchestrator may pass `unified-requirements`
+    // / `unified-plan` — so the persona's adaptation block silently never fires on
+    // a unified artifact. The shared subagent-template must map unified-* to base.
+    const subagentTemplate = readRepoFile(
+      "skills/ce-doc-review/references/subagent-template.md",
+    )
+    expect(subagentTemplate).toMatch(/apply the `requirements` branch for `unified-requirements`/i)
+    expect(subagentTemplate).toMatch(/the `plan` branch for `unified-plan`/i)
   })
 
   test("ce-plan enriches unified plans in place and preserves legacy inputs", () => {

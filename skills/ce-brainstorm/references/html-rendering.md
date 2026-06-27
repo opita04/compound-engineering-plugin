@@ -472,9 +472,11 @@ rendering may include a wireframe mockup. The trigger is the
 with a UI/layout shape can carry a wireframe, whether or not the brainstorm
 as a whole is "a visual product" — a backend-heavy brainstorm with one
 screen change still earns a wireframe for that requirement. It still applies
-only to brainstorm requirements docs (not plan artifacts), and only to
-UI-shaped requirements — a non-visual requirement (API design, data model,
-agent workflow, infrastructure) takes a conceptual diagram instead, not a
+to brainstorm **requirements** output — the requirements-only unified plan
+`ce-brainstorm` writes (now under `docs/plans/`), not an implementation-ready
+plan (`ce-plan`'s enriched output) — and only to UI-shaped requirements — a
+non-visual requirement (API design, data model, agent workflow,
+infrastructure) takes a conceptual diagram instead, not a
 wireframe.
 
 When a wireframe is included:
