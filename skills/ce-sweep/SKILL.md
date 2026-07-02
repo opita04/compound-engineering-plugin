@@ -51,7 +51,8 @@ If the line above is an absolute path, use it as `<repo-root>`. If it is empty o
 
 **Config keys read here:**
 - `feedback_sources` — list of source entries; each carries a `type` (`slack`, `github-issues`, `email`), its target, the standing-approved ack action, an optional close-out action, and an optional `sensitive: true`. Presence of this key means the skill is configured.
-- `sweep_state_path` — path to the state file, established at setup; fallback `.compound-engineering/sweep-state.yaml`. Must be a committable (non-gitignored) path — the state file is committed each run.
+- `sweep_state_path` — path to the state file, established at setup; fallback `docs/feedback-sweep/state.yml`. A repo-internal path means committed mode (the state file is committed each run and must not be gitignored); a path outside the repo (e.g. under `/tmp`) means machine-local mode (the state file is never committed — only the plan is).
+- `sweep_lease_ttl_minutes` — single-writer lease staleness threshold; default `60`. Passed to `lease-acquire` in 2a.
 - `sweep_shared_branch` — `true` when the state file lives on a shared branch multiple checkouts push to (see 2a topology); default `false`.
 - `sweep_ack_cap` — integer circuit-breaker threshold; default `25`.
 
@@ -77,7 +78,7 @@ Run the phases in order.
 
 #### 2a. Acquire lease + validate
 
-`lease-acquire --state <state> --writer <writer>`:
+`lease-acquire --state <state> --writer <writer> --ttl-minutes <sweep_lease_ttl_minutes>`:
 - `LOCKED` — another live writer holds it. Record the outcome and stop: `run-record --state <state> --writer <writer> --outcome aborted-locked --counts '{}' --timestamp <ISO now>`, report that a concurrent sweep is running, and exit.
 - `STALE-RECLAIMED` — an expired lease was taken over; proceed, and note the takeover in the final summary.
 - `OK` — proceed.
@@ -135,7 +136,7 @@ Read `references/plan-template.md` and follow it. Target the stable path `docs/p
 
 **Rotation check first.** If the file exists and its frontmatter is NOT both `product_contract_source: ce-sweep` and `artifact_readiness: requirements-only`, archive it untouched to a dated sibling `docs/plans/feedback-sweep-plan-YYYY-MM-DD.md` and write a fresh plan from the template. Never overwrite an unrelated plan in place.
 
-Rewrite ONLY the machine-owned item region (between the `<!-- sweep-items:start -->` / `<!-- sweep-items:end -->` markers); never read or write inside the human-owned notes region. Append new actionable items with their state ids, drain items that are now `closed`, and land any headless-deferred decisions in the Outstanding Questions section.
+Rewrite ONLY the machine-owned region — the `date` frontmatter key, `### Summary`, the `<!-- sweep-items:start -->` / `<!-- sweep-items:end -->` marker region, and `### Outstanding Questions` (matching the template's reconciliation rules); never read or write inside the human-owned notes region. Append new actionable items with their state ids, drain items that are now `closed`, and land any headless-deferred decisions in the Outstanding Questions section.
 
 #### 2h. Decision round
 
@@ -143,7 +144,7 @@ Interactive only. For items needing a product call, ask the user — grouped by 
 
 #### 2i. Wrap-up
 
-- **Commit.** `git add` ONLY `<state>` and `docs/plans/feedback-sweep-plan.md` (never `-A`), then commit `docs(sweep): feedback sweep <date>`. A commit failure is reported, not fatal. In local-commit mode, never push. In shared-branch mode (`sweep_shared_branch: true`), fetch, rebase, and push the final commit.
+- **Commit.** `git add` ONLY `docs/plans/feedback-sweep-plan.md` plus `<state>` when it is repo-internal (never `-A`; machine-local state under `/tmp` is never committed), then commit `docs(sweep): feedback sweep <date>`. A commit failure is reported, not fatal. In local-commit mode, never push. In shared-branch mode (`sweep_shared_branch: true`), fetch, rebase, and push the final commit.
 - **Record the run.** `run-record --state <state> --writer <writer> --outcome <completed|partial|failed> --counts '<per-source JSON>' --timestamp <ISO now>`.
 - **Release.** `lease-release --state <state> --writer <writer>`.
 - **Summary** (always emit): new items by source; recordings analyzed, each with its one-line finding; closed items with their fix evidence; the `ack_deferred` / `manual_stuck` / needs-attention list; any circuit-breaker or stale-reclaim note; and always the plan path with the handoff line:
