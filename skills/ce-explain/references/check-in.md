@@ -8,6 +8,8 @@ Offer a check-in when retention is the point: a hard or unfamiliar concept, a gn
 
 The user can always decline the offer, and a decline is final for the run — do not re-offer.
 
+In diff mode, word the offer without describing the change's content or purpose — an offer that summarizes the change pre-leaks the reveal.
+
 ## Predict-then-reveal (diff mode)
 
 The prediction must come before any interpretation reaches the user, or the mechanic is dead on arrival.
