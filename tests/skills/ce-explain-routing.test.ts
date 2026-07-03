@@ -37,9 +37,11 @@ describe("ce-explain destination and handoff routing", () => {
       // Bullet form: `- **<fragment>**` then a separator and at least one
       // non-newline character of action text on the SAME line ([ \t]*, not
       // \s*, so an empty-action bullet cannot match by spilling into the next
-      // bullet's leading `-`).
+      // bullet's leading `-`). The separator requires surrounding whitespace
+      // (` — ` / ` - `) so a mid-word hyphen in a qualifier like
+      // "(auto-generated)" cannot satisfy the action-separator match.
       const inlineRoutingPattern = new RegExp(
-        `^- \\*\\*[^\\n]*${escaped}[^\\n]*\\*\\*[^\\n]*[—-][ \\t]*[^\\n]+`,
+        `^- \\*\\*[^\\n]*${escaped}[^\\n]*\\*\\*[^\\n]*[ \\t][—-][ \\t]+[^\\n]+`,
         "m",
       )
       expect(

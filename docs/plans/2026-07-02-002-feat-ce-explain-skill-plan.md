@@ -268,10 +268,10 @@ The tree is a scope declaration; per-unit Files lists are authoritative.
 - **Requirements:** R12.
 - **Dependencies:** U1 (final description text).
 - **Files:** `README.md`, `docs/skills/README.md`, `docs/skills/ce-explain.md`, `tests/release-metadata.test.ts`.
-- **Approach:** README inventory row linking `docs/skills/ce-explain.md`; bump the "ships 28 skills" sentence to 29; judgment call — also add to the curated "Additional skills" table (it fits the on-demand anchor shape alongside `/ce-pov`). Catalog row under **On-Demand** in `docs/skills/README.md`. Docs page follows `docs/skills/ce-pov.md`'s heading shape (TL;DR, Problem, Solution, Novel mechanics, Quick example, When to reach for it, Reference, See Also). Bump `skills: 28` → `29` at `tests/release-metadata.test.ts:150` (the count is derived from disk; the assertion is the only hand edit). No manifest edits — skills auto-discover. No legacy-cleanup entries (additions don't need them).
+- **Approach:** README inventory row linking `docs/skills/ce-explain.md`; bump the "ships 27 skills" sentence to 28; judgment call — also add to the curated "Additional skills" table (it fits the on-demand anchor shape alongside `/ce-pov`). Catalog row under **On-Demand** in `docs/skills/README.md`. Docs page follows `docs/skills/ce-pov.md`'s heading shape (TL;DR, Problem, Solution, Novel mechanics, Quick example, When to reach for it, Reference, See Also). Bump `skills: 27` → `28` at `tests/release-metadata.test.ts:150` (the count is derived from disk; the assertion is the only hand edit; the unmerged ce-sweep branch bumps the same lines, so whichever merges second resolves the trivial conflict to 29). No manifest edits — skills auto-discover. No legacy-cleanup entries (additions don't need them).
 - **Patterns to follow:** `docs/skills/ce-pov.md`; row formats at `README.md:118` and the On-Demand rows in `docs/skills/README.md`.
 - **Test scenarios:**
-  - `bun test` release-metadata suite green at 29.
+  - `bun test` release-metadata suite green at 28.
   - `bun run release:validate` passes.
 - **Verification:** Both commands green; README count sentence, inventory row, catalog row, and docs page all present and consistent.
 
@@ -307,7 +307,7 @@ Behavioral changes to skill prose are never validated by re-invoking the skill i
 - All six units complete; `bun test` and `bun run release:validate` green.
 - The six U6 evals pass, or carry documented downgrade decisions (the ce-polish handoff is the known candidate).
 - The leak test (R13) passes structurally: prediction turn ends before any interpretive content in the transcript.
-- Registration surfaces are mutually consistent: README count sentence says 29, inventory row, On-Demand catalog row, and `docs/skills/ce-explain.md` all exist and agree with the SKILL.md description.
+- Registration surfaces are mutually consistent: README count sentence says 28, inventory row, On-Demand catalog row, and `docs/skills/ce-explain.md` all exist and agree with the SKILL.md description.
 - The skill description is within the 100–300 character budget.
 - No abandoned experiments or dead reference files remain in the diff.
 
