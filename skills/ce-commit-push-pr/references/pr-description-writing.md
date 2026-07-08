@@ -123,8 +123,10 @@ Decide whether the change introduces a concept — a pattern, technique, library
 **Check each candidate against the base ref, never the working tree.** The working tree contains this PR's own code, so grepping it finds the concept you just added and wrongly concludes it is already established. Check the base instead (Pre-A already resolved it):
 
 ```bash
-git grep -il "<term>" "<base-remote>/<base>" | head -5
+git grep -il -e "<term>" "<base-remote>/<base>" | head -5
 ```
+
+Run one call per candidate — candidates cap at two, so the cost is trivial — and read establishment from the output: empty output means the concept is absent from the base.
 
 A candidate is teachable only when it is both new to this codebase in this PR and transferable beyond it. Never teach: routine use of an already-established repo pattern, ordinary refactors, renames, dependency bumps, or project-internal plumbing with no transferable idea. When in doubt, omit — a missing section costs little; a patronizing one trains readers to skip the feature.
 
