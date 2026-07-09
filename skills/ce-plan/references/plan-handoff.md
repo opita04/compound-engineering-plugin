@@ -95,9 +95,10 @@ Based on selection (the bare per-option routing is also stated inline in the SKI
     fi
     copy_status=$?
     rm -f "$PROMPT_FILE"
+    exit "$copy_status"
     ```
 
-    Only tell the user it was copied when `copy_status` is 0 (the clipboard command's status, captured before `rm`), and say "copied to this machine's clipboard" — not "your clipboard": on a remote or sandboxed session the copy lands on the wrong machine and the paste comes up empty, so the printed block above stays the source of truth. If no tool is found or the copy fails, say nothing about the clipboard. After printing (and the optional copy), return to the options.
+    The `exit "$copy_status"` at the end is load-bearing: it makes the block's exit code the *clipboard* result, not `rm`'s (which is otherwise the last command and always 0, masking a failed or no-op copy). Only tell the user it was copied when that exit code is 0, and say "copied to this machine's clipboard" — not "your clipboard": on a remote or sandboxed session the copy lands on the wrong machine and the paste comes up empty, so the printed block above stays the source of truth. If no tool is found or the copy fails (nonzero exit), say nothing about the clipboard. After printing (and the optional copy), return to the options.
 
   Render only for implementation-ready code plans, and only where the host has goal capability at all (Codex `create_goal` or Claude Code user-typed `/goal`) — omit the option where neither exists.
 - **Decide on the review's open items** -> Re-invoke the `ce-doc-review` skill on the plan path **without** `mode:headless` so the interactive routing question and walkthrough fire. The headless pass already applied `safe_auto` fixes and recorded its findings in the session, so the interactive pass picks up where headless stopped — its R29 suppression rule prevents prior-round Skipped/Deferred entries from re-raising. After it returns, re-render this menu with the refreshed counts so the user can pick what to do next.
