@@ -209,4 +209,4 @@ Before returning the body, check it against the material claims from Step A and 
 
 - Is every claim the diff can't establish present — and is any claim the diff *does* show restated needlessly?
 - Is decision-changing evidence stated as a result rather than collapsed into an unexplained "tests passed", with demonstrated results kept distinct from assumptions and from mixed or negative outcomes?
-- Can any sentence or section be cut without lowering reviewer confidence? If so, cut it.
+- Can any sentence or section of the *description* be cut without lowering reviewer confidence? If so, cut it — but never the required Step D badge/footer, which is mandated boilerplate, not descriptive content subject to this trim.
