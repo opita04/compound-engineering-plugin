@@ -231,6 +231,25 @@ You can also browse it through Kimi's custom marketplace flow:
 
 After installing or updating, run `/reload` or start a new Kimi session so the plugin skills are loaded.
 
+### Grok Build CLI (`grok`)
+
+xAI's [Grok Build CLI](https://x.ai/cli) (`grok`) installs Compound Engineering directly from this repository — the repo root is a valid Grok plugin (`grok` reads the existing Claude-compatible manifests, and the repo also ships a native `.grok-plugin/plugin.json`):
+
+```bash
+grok plugin install EveryInc/compound-engineering-plugin
+```
+
+This tracks the repository; run `grok plugin update` to pull the latest. To browse it as a marketplace source instead, the repo ships a native `.grok-plugin/marketplace.json`:
+
+```bash
+grok plugin marketplace add EveryInc/compound-engineering-plugin
+grok plugin install compound-engineering
+```
+
+Both paths track the repository directly (no commit pin), so no Bun install step is needed. Add `--trust` to skip the install confirmation. `grok` stores config under `~/.grok`; start a new session after installing so the skills load.
+
+Compound Engineering is also being submitted to the official [xAI plugin marketplace](https://github.com/xai-org/plugin-marketplace); see [`docs/grok-marketplace-submission.md`](docs/grok-marketplace-submission.md) for the maintainer runbook.
+
 ### GitHub Copilot
 
 For **VS Code Copilot Agent Plugins**:
