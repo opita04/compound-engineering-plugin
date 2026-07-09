@@ -36,7 +36,7 @@ These rules apply to every brainstorm, including the universal (non-software) fl
 
 ## Output Guidance
 
-- **Keep outputs concise** - Prefer short sections, brief bullets, and only enough detail to support the next decision.
+- **Prioritize decision-relevant detail** - Preserve the facts, tradeoffs, and caveats needed for the next decision; trim introductions, repetition, and optional background first.
 
 ## Model Tiers
 

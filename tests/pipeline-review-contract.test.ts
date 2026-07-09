@@ -525,6 +525,17 @@ describe("ce-doc-review contract", () => {
     expect(content).toContain("`references/bulk-preview.md`")
   })
 
+  test("keeps security document review on the parent capability tier", async () => {
+    const content = await readRepoFile("skills/ce-doc-review/SKILL.md")
+    const modelTierSection = content.slice(content.indexOf("Model tiering lives here"))
+    const securityTierLine = modelTierSection
+      .split("\n")
+      .find((line) => line.includes("security-lens-reviewer"))
+
+    expect(securityTierLine).toContain("inherit the parent model")
+    expect(securityTierLine).not.toContain("mid-tier")
+  })
+
   test("walkthrough and bulk-preview reference files exist with required mechanics", async () => {
     const walkthrough = await readRepoFile(
       "skills/ce-doc-review/references/walkthrough.md"
