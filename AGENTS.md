@@ -251,9 +251,11 @@ How a bundled-file reference resolves depends on *who* resolves it and whether a
 
 ```
 # set inline in the SAME command (shell state does not persist between Bash calls):
-SKILL_DIR="<absolute path of the directory containing the SKILL.md you just read>"
+SKILL_DIR="<absolute path of the directory containing the SKILL.md you just read>";
 bash "$SKILL_DIR/scripts/my-script.sh" ARG
 ```
+
+**Keep the trailing `;` on the assignment line.** Some hosts (observed on Codex) flatten a fenced multi-line block into a single line by replacing the newline with a space before executing it. Without the `;`, `SKILL_DIR="…"` + newline + `bash "$SKILL_DIR/…"` collapses to the env-var-prefix form `SKILL_DIR="…" bash "$SKILL_DIR/…"`, where the shell expands `$SKILL_DIR` *before* the prefix assignment takes effect — so it expands to empty and the script path becomes `/scripts/my-script.sh` (`No such file or directory`). The trailing `;` makes the assignment a complete statement that survives flattening; it is load-bearing, not a style choice, so do not remove it.
 
 An existence guard (`if [ -f "$SKILL_DIR/scripts/my-script.sh" ]; then … else echo "not found — re-check the SKILL.md path"; fi`) is optional — useful when there's a real fallback, but see the permission caveat below before guarding a pinned call.
 

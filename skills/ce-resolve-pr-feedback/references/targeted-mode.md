@@ -20,7 +20,7 @@ gh api repos/OWNER/REPO/pulls/comments/COMMENT_ID \
 # SKILL_DIR = the absolute directory you loaded the ce-resolve-pr-feedback SKILL.md from
 # (the Bash tool's CWD is the user's project, not the skill dir; shell state does not
 #  persist between Bash calls, so always set it before calling a bundled script).
-SKILL_DIR="<absolute path of the directory containing the ce-resolve-pr-feedback SKILL.md>"
+SKILL_DIR="<absolute path of the directory containing the ce-resolve-pr-feedback SKILL.md>";
 SCRIPT_DIR="$SKILL_DIR/scripts"
 if [ ! -f "$SCRIPT_DIR/get-thread-for-comment" ]; then
   echo "ce-resolve-pr-feedback bundled scripts not found under $SCRIPT_DIR; use Full Mode's fallback gh commands to inspect the PR comments." >&2
