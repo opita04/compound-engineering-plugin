@@ -32,11 +32,7 @@ Run the bundled check script. Set `SKILL_DIR` to the absolute directory you load
 
 ```bash
 SKILL_DIR="<absolute path of the directory containing this SKILL.md>";
-if [ -f "$SKILL_DIR/scripts/check-health" ]; then
-  bash "$SKILL_DIR/scripts/check-health" --version VERSION
-else
-  echo "Bundled health script not found at $SKILL_DIR/scripts/check-health; run the inline checks from ce-setup instead."
-fi
+if [ -f "$SKILL_DIR/scripts/check-health" ]; then bash "$SKILL_DIR/scripts/check-health" --version VERSION; else echo "Bundled health script not found at $SKILL_DIR/scripts/check-health; run the inline checks from ce-setup instead."; fi
 ```
 
 Use the same command without `--version VERSION` if Step 1 could not determine a version.
