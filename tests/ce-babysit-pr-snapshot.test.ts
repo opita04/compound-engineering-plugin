@@ -40,7 +40,7 @@ function watch(stateDir: string, fetch: string, extra: string[] = []): any {
   const r = spawnSync(
     "python3",
     [SCRIPT, "watch", "--pr", "1", "--repo", "o/r", "--state-dir", stateDir, "--fetch-file", fetch,
-      "--interval", "0.1", "--max-runtime", "2", ...extra],
+      "--interval", "0.1", "--max-runtime", "1", ...extra],
     { encoding: "utf8" },
   )
   expect(r.status, r.stderr).toBe(0)
@@ -475,7 +475,7 @@ describe("ce-babysit-pr pr-snapshot engine", () => {
     expect(watch(path.join(dir, "w3"), cf, ["--settle-seconds", "300"]).reason).toBe("max-runtime")
     // same clean state with a zero settle window -> merge-ready wake
     expect(watch(path.join(dir, "w4"), cf, ["--settle-seconds", "0"]).reason).toBe("merge-ready")
-  })
+  }, 15000) // spawns 4 watch subprocesses incl. a max-runtime timeout -> explicit timeout over Bun's 5s default
 
   test("watch: an in-progress review signal blocks the merge-ready wake regardless of quiet time", () => {
     // "Looks ready" is signal-gated: a green/CLEAN PR with a review still in flight (review_in_progress)
@@ -486,14 +486,14 @@ describe("ce-babysit-pr pr-snapshot engine", () => {
     expect(watch(path.join(dir, "rip1"), inprog, ["--settle-seconds", "0"]).reason).toBe("max-runtime")
     const nosig = fetchFile(dir, "rip2.json", { ...base, review_in_progress: false })
     expect(watch(path.join(dir, "rip2"), nosig, ["--settle-seconds", "0"]).reason).toBe("merge-ready")
-  })
+  }, 15000)
 
   test("watch: a no-check MERGEABLE/CLEAN PR still reaches merge-ready (the >=1-check guard is pipeline-only)", () => {
     // A repo with no configured checks: all_checks_ok is false (no observed check), but the
     // interactive merge-ready wake must still fire for a CLEAN/MERGEABLE PR with no backlog.
     const nochecks = { ...FAILING, merge_state_status: "CLEAN", review_decision: "APPROVED", threads: [], checks: [] }
     expect(watch(path.join(dir, "nc1"), fetchFile(dir, "nc1.json", nochecks), ["--settle-seconds", "0"]).reason).toBe("merge-ready")
-  })
+  }, 15000)
 
   test("watch: a dispatched terminal-red check present at arm is a standing residual — kept watching, not re-woken", () => {
     // A failing check ce-debug marked dispatched leaves counts.ci == 0 while has_failing_checks stays
@@ -507,7 +507,7 @@ describe("ce-babysit-pr pr-snapshot engine", () => {
     snapshot(sd, rf) // the failing check is actionable on this first tick
     mark(sd, ["--check", "CI/test"]) // now dispatched -> counts.ci == 0, terminal-red residual, already surfaced
     expect(watch(sd, rf).reason).toBe("max-runtime")
-  })
+  }, 15000)
 
   test("watch: a parked needs-human does not wake or end the loop — it keeps watching the other streams", () => {
     // The stop-vs-residual fix: a standing needs-human present at arm time must NOT re-wake the
@@ -526,5 +526,5 @@ describe("ce-babysit-pr pr-snapshot engine", () => {
     // a new actionable thread arrives while the needs-human stays parked -> wakes on the new work
     const withNew = fetchFile(dir, "nhw3.json", base([{ thread_id: "T2", last_comment_id: "D1", last_comment_at: "D1" }]))
     expect(watch(sd, withNew).reason).toBe("actionable")
-  })
+  }, 15000)
 })
