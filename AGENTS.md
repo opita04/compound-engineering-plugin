@@ -90,6 +90,20 @@ cat .claude-plugin/plugin.json | jq .
 
 `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` are authoring context for this source repository. Skills are installed into end-user environments, where they run against the user's local instruction files, not this repo's. Behavioral rules that must affect a skill at runtime belong in that skill's `SKILL.md` or files under its own `references/` directory.
 
+## Cross-Model Skill Authoring
+
+This repository authors each skill once and distributes it across multiple agent models and harnesses. Before creating, materially revising, or reviewing a skill or skill-local persona, read `docs/solutions/skill-design/portable-agent-skill-authoring.md`.
+
+That field guide is the canonical reasoning layer for outcome-first authoring, model and harness portability, protocol versus judgment, proportional authority, tool adapters, evidence-backed review, and targeted behavioral evaluation. It is not a template: apply only the sections relevant to the skill. The repository-specific rules elsewhere in this file supplement the guide and take precedence where they are more specific.
+
+### Skill Loading Supplements
+
+- Keep every load-bearing action, route, and reference-load instruction inline at the point where it must fire (`docs/solutions/skill-design/post-menu-routing-belongs-inline.md`).
+- Do not inline a summary complete enough to suppress loading the authoritative reference.
+- When load-bearing content must appear in two always-loaded places, add a parity test.
+- Extract a block to `references/` when it is conditional or late-sequence and a meaningful share of the skill (~20%+). Replace it with a 1-3 line condition and backtick path.
+- Never use `@` for an extracted block; it inlines at load time and defeats extraction.
+
 ## Referencing Project Conventions in Skills
 
 When a skill needs to discover a project convention at runtime — the issue tracker, coding standards, commit format, lint command, scope constraints, etc. — describe **what to look for in the agent's existing context**, not **which file to open**.
@@ -118,35 +132,6 @@ Behavioral changes to a plugin skill or skill-local persona (anything under `ski
 - **Do NOT edit `~/.claude/plugins/cache/` or `~/.claude/plugins/marketplaces/` to try to force a reload.** Those paths are user machine state, not repo-managed. Modifying them does not reliably bypass the in-session cache (it didn't, in observed behavior), risks being silently overwritten by plugin updates, and is the wrong layer to test from. The skill-creator pattern is the proper approach; if you genuinely need fresh-loaded behavior of the typed-agent dispatch path, restart the Claude Code session — but skill-creator is preferred for fast iteration.
 
 - **Mechanical changes do not have this restriction.** Skill scripts (e.g., `extract-metadata.py`), parser logic, conversion code, and anything `bun test` exercises always run the current source. The caching issue only affects LLM-driven skill prose behavior dispatched through the plugin loader.
-
-## Writing Skill Instructions
-
-Every line of skill prose must change agent behavior. Before keeping a line, apply the deletion test: if removing it would not change the output, it is a no-op — delete it. Agents already write detailed commit messages, try to be thorough, and aim for readable code by default, so generic exhortations to do those things ("be thorough", "be comprehensive", "write clean/readable code", "think carefully", "world-class", "high quality") are no-ops that only add tokens and noise.
-
-A line earns its place when it does one of these:
-
-- States a falsifiable constraint: a threshold, format, path, schema, or ordering.
-- Counters a known default tendency: a negative constraint ("do NOT add comments", "never push to main", "stop after X") or a guard against a shortcut the model would otherwise take.
-- Supplies domain knowledge the agent would not otherwise have.
-
-An adjective is fine **only** when immediately operationalized by a concrete rule (e.g., "keep outputs concise — only enough detail to support the next decision"). The adjective alone is framing; the operationalization is the instruction. Do not append motivational rationale ("the quality of everything depends on this") to a directive that already stands on its own, and do not restate an instruction the same file already gives unless it is deliberate spaced repetition placed where drift occurs.
-
-### Inline the Trigger, Not the Content
-
-SKILL.md loads at session start; references load on demand. That asymmetry sets what belongs where, and the resolution is *what* you inline, not *how much*.
-
-A **load-bearing instruction** — one that MUST fire reliably: the action, the bare routing that invokes the next step, the instruction to load the reference itself — belongs inline at the top of its phase, because an agent that never opened the reference would otherwise stop or guess (`docs/solutions/skill-design/post-menu-routing-belongs-inline.md`).
-
-But do **not** inline a *summary of what the reference contains*. It backfires twice:
-
-- **Drift.** The two copies diverge silently and the agent follows whichever one loaded. When a load-bearing block genuinely must appear in two always-loaded places, guard the copies with a parity test rather than trusting them to stay in sync.
-- **Suppressed load.** A paraphrase suppresses the very load it sits beside — an agent that already has a workable inline version judges it "has enough" and never opens the file, so the reference's templates, shaping rules, and examples never reach it. For a reference that should always load, keep the inline alternative strictly load-instruction-only.
-
-Test: if the inline text is complete enough to act on without the reference, the agent will — so inline only what is incomplete by design ("act, then read X"). The inline part should create demand for the reference, not substitute for it.
-
-### Extract Conditional and Late-Sequence Blocks
-
-Skill content carried from trigger time rides in every subsequent message — every tool call, agent dispatch, and response — so the cost compounds across a session, and more for skills that orchestrate many calls. Extract a block to `references/` when it is **conditional** (executes only under specific conditions) or **late-sequence** (needed only after many prior calls) *and* is a meaningful share of the skill (~20%+). Replace it with a 1-3 line stub stating the condition and a backtick path (e.g., "Read `references/deepening-workflow.md`"). Never use `@` for an extracted block — `@` inlines at load time and defeats the extraction. The always-on trigger from "Inline the Trigger, Not the Content" stays inline; only the conditional substance moves.
 
 ## Coding Conventions
 
