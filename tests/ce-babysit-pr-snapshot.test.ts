@@ -376,14 +376,36 @@ describe("ce-babysit-pr pr-snapshot engine", () => {
     expect(watch(path.join(dir, "w4"), cf, ["--settle-seconds", "0"]).reason).toBe("merge-ready")
   })
 
-  test("watch: a dispatched terminal-red check wakes 'blocked-failing' instead of idling to max-runtime", () => {
-    // A failing check that ce-debug marked dispatched leaves counts.ci == 0 while has_failing_checks
-    // stays true; the detector must hand that residual back, not sit idle until max-runtime.
+  test("watch: a dispatched terminal-red check present at arm is a standing residual — kept watching, not re-woken", () => {
+    // A failing check ce-debug marked dispatched leaves counts.ci == 0 while has_failing_checks stays
+    // true. It was already surfaced when it was dispatched, so it is in the watch's arm-time baseline
+    // and must NOT re-wake the loop (that was the pre-gating behavior); the watch keeps running for
+    // other streams. `blocked-failing` only fires on a *later* transition to terminal-red (e.g. a
+    // rerun completing red) — the same wake-on-new path the parked-needs-human test exercises.
     const red = { ...FAILING, threads: [], checks: [{ key: "CI/test", name: "test", status: "COMPLETED", conclusion: "FAILURE", details_url: "u" }] }
     const rf = fetchFile(dir, "wbf.json", red)
     const sd = path.join(dir, "wbf")
     snapshot(sd, rf) // the failing check is actionable on this first tick
-    mark(sd, ["--check", "CI/test"]) // now dispatched -> counts.ci == 0, has_failing_checks still true
-    expect(watch(sd, rf).reason).toBe("blocked-failing")
+    mark(sd, ["--check", "CI/test"]) // now dispatched -> counts.ci == 0, terminal-red residual, already surfaced
+    expect(watch(sd, rf).reason).toBe("max-runtime")
+  })
+
+  test("watch: a parked needs-human does not wake or end the loop — it keeps watching the other streams", () => {
+    // The stop-vs-residual fix: a standing needs-human present at arm time must NOT re-wake the
+    // detector (that would busy-wake / falsely terminate the self-sustaining watch); the watch keeps
+    // polling for new work and only wakes when something genuinely new arrives.
+    const sd = path.join(dir, "nhwatch")
+    const base = (extra: any[] = []) => ({
+      pr_state: "OPEN", mergeable: "MERGEABLE", merge_state_status: "CLEAN", review_decision: null,
+      head_sha: "s1", url: "http://x/1", checks: [],
+      threads: [{ thread_id: "T1", last_comment_id: "C1", last_comment_at: "C1" }, ...extra],
+    })
+    snapshot(sd, fetchFile(dir, "nhw1.json", base()))
+    mark(sd, ["--thread", "T1", "--disposition", "needs-human"])
+    // parked needs-human, nothing else actionable -> keeps watching, times out (does NOT wake needs-human)
+    expect(watch(sd, fetchFile(dir, "nhw2.json", base())).reason).toBe("max-runtime")
+    // a new actionable thread arrives while the needs-human stays parked -> wakes on the new work
+    const withNew = fetchFile(dir, "nhw3.json", base([{ thread_id: "T2", last_comment_id: "D1", last_comment_at: "D1" }]))
+    expect(watch(sd, withNew).reason).toBe("actionable")
   })
 })

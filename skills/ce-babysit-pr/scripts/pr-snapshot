@@ -516,6 +516,12 @@ def diff(state, cur, now=None):
         identity_fn=lambda t: [t.get("last_comment_id"), t.get("last_comment_at")])
     new_feedback, actionable_feedback, human_feedback = _apply_dispositions(cur.get("feedback") or [], "id", prior_feedback)
     open_needs_human = human_threads + human_feedback
+    # Identities of the currently-parked needs-human items, so the watch can tell an already-
+    # surfaced residual (do not re-wake) from a newly-arrived one (wake) — a parked human decision
+    # must not busy-wake the loop or terminate it.
+    needs_human_ids = sorted(
+        [k for k, r in new_threads.items() if r.get("disposition") == DISPOSITION_NEEDS_HUMAN]
+        + [k for k, r in new_feedback.items() if r.get("disposition") == DISPOSITION_NEEDS_HUMAN])
 
     state["head_sha"] = head or state.get("head_sha")
     state["checks"] = new_checks
@@ -561,6 +567,7 @@ def diff(state, cur, now=None):
         "checks_awaiting_approval": awaiting_approval,
         "blocked_external": blocked_external,
         "open_needs_human": open_needs_human,
+        "needs_human_ids": needs_human_ids,
         "actionable": {"threads": actionable_threads, "ci": actionable_ci, "comments": actionable_feedback},
         "counts": {"threads": len(actionable_threads), "ci": len(actionable_ci),
                    "comments": len(actionable_feedback), "needs_human": open_needs_human},
@@ -659,17 +666,36 @@ def _emit_wake(reason, **fields):
     print(json.dumps({"event": "BABYSIT_WAKE", "reason": reason, **fields}), flush=True)
 
 
+def _blocker_sig(a):
+    """Identity of blockers the agent surfaces once but cannot self-clear — parked needs-human
+    items and a dispatched terminally-red check. The watch captures this at arm time and does not
+    re-wake on a blocker already in that baseline, so a parked human decision keeps the watch alive
+    for the other streams instead of busy-waking or terminating it."""
+    sig = set(a.get("needs_human_ids") or [])
+    if a.get("has_failing_checks") and a.get("checks_terminal") and not (a.get("counts") or {}).get("ci"):
+        sig.add("__terminal_red__")
+    return frozenset(sig)
+
+
 def cmd_watch(args):
     """Deterministic background change-detector (no agent tokens between changes): poll on an
     interval, print one wake sentinel line and exit when there is something for the agent to do
-    (an actionable change or a stop condition), or exit on the stop-signal file / max-runtime."""
+    (an actionable change or a stop condition), or exit on the stop-signal file / max-runtime.
+    A residual already present at arm time (a parked needs-human, or a dispatched terminal-red the
+    agent already handed back) does NOT re-wake the loop — it keeps watching the other streams;
+    only a *new* blocker (signature grown past the baseline) wakes."""
     deadline = (time.monotonic() + args.max_runtime) if args.max_runtime else None
+    armed = None  # baseline blocker signature captured on the first poll (already-surfaced residuals)
     while True:
         if args.stop_file and os.path.exists(args.stop_file):
             _emit_wake("stop-signal")
             return
         actionable = _run_snapshot(args, _now())
+        if armed is None:
+            armed = _blocker_sig(actionable)
         reason = _wake_reason(actionable, args.settle_seconds)
+        if reason in ("needs-human", "blocked-failing") and _blocker_sig(actionable) <= armed:
+            reason = None   # already-surfaced residual — keep watching, do not re-wake or terminate
         if reason:
             _emit_wake(reason, url=actionable.get("url"),
                        pr_state=actionable.get("pr_state"), counts=actionable.get("counts"))
