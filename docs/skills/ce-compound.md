@@ -159,6 +159,31 @@ The auto-invoke triggers happen mid-conversation; you don't need to remember the
 
 ---
 
+## Make Capture Automatic
+
+The auto-invoke trigger phrases ("that worked", "it's fixed") only fire when you happen to say one of them. If you keep forgetting to capture, add a standing instruction to your agent's instruction file so the agent proposes capture on its own once a fix is verified — before it hands the session back to you.
+
+Put it in the repo's `AGENTS.md`/`CLAUDE.md`, or in your global instruction file (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`) to make it apply in every repo. Pick the variant that matches how much of a checkpoint you want:
+
+**Offer first** — the agent asks before capturing, so you get a beat to say "not this one":
+
+> After a solved, verified problem produces a non-trivial, reusable learning, offer once — before the final handoff — to invoke the `ce-compound` skill. Only in repositories that accept `docs/solutions/` as a tracked knowledge store.
+
+**Run it automatically** — no prompt, because not being interrupted is the whole point of automating it:
+
+> After a solved, verified problem produces a non-trivial, reusable learning, automatically invoke the `ce-compound` skill in `mode:headless`. Only in repositories that accept `docs/solutions/` as a tracked knowledge store.
+
+Auto-run writes to `docs/solutions/` (and may touch `CONCEPTS.md` or, in headless, the instruction file) without asking — but that's the point, and it's no scarier than the other edits you're already making on the branch and reviewing before you commit. Use `mode:headless` explicitly: a plain "automatically invoke" still runs interactively and can stop for the one-time discoverability-consent prompt, so it isn't truly silent.
+
+Every other phrase in those lines is deliberate too:
+
+- **"invoke the `ce-compound` skill"**, not "run `/ce-compound`" — instruction files are read by whatever agent you're using (Codex, Gemini, Cursor, Claude Code), and the slash-command form isn't reliably agent-callable across all of them. Reference the capability, not the keystroke.
+- **"before the final handoff"**, not "at the end of the session" — an agent can't reliably tell when a session has *ended*, but it does know when it's about to hand a verified result back to you.
+- **"non-trivial, reusable learning"** — the bar is a generalizable insight worth re-reading, not merely an expensive one-off incident.
+- **"repositories that accept `docs/solutions/`"** — the real question is whether the repo welcomes generated learning docs, which is usually broader than "do I own it." Forks and open-source projects you contribute to often don't; some repos you don't own still do.
+
+---
+
 ## Output Artifact
 
 ```text
