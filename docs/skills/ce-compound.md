@@ -171,9 +171,9 @@ Put it in the repo's `AGENTS.md`/`CLAUDE.md`, or in your global instruction file
 
 **Run it automatically** — no prompt, because not being interrupted is the whole point of automating it:
 
-> After a solved, verified problem produces a non-trivial, reusable learning, automatically invoke the `ce-compound` skill in `mode:headless`. Only in repositories that accept `docs/solutions/` as a tracked knowledge store.
+> After a solved, verified problem produces a non-trivial, reusable learning, automatically invoke the `ce-compound` skill, passing `mode:headless` as the skill argument. Only in repositories that accept `docs/solutions/` as a tracked knowledge store.
 
-Auto-run writes to `docs/solutions/` (and may touch `CONCEPTS.md` or, in headless, the instruction file) without asking — but that's the point, and it's no scarier than the other edits you're already making on the branch and reviewing before you commit. Use `mode:headless` explicitly: a plain "automatically invoke" still runs interactively and can stop for the one-time discoverability-consent prompt, so it isn't truly silent.
+Auto-run writes to `docs/solutions/` (and may touch `CONCEPTS.md` or, in headless, the instruction file) without asking — but that's the point, and it's no scarier than the other edits you're already making on the branch and reviewing before you commit. Pass `mode:headless` as an actual argument, not just as a description: the skill only goes non-interactive when that token is present in the invocation, so a plain "automatically invoke" still runs interactively and can stop for the one-time discoverability-consent prompt — not truly silent.
 
 Every other phrase in those lines is deliberate too:
 
