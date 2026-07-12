@@ -390,6 +390,17 @@ describe("ce-babysit-pr pr-snapshot engine", () => {
     expect(watch(path.join(dir, "w4"), cf, ["--settle-seconds", "0"]).reason).toBe("merge-ready")
   })
 
+  test("watch: an in-progress review signal blocks the merge-ready wake regardless of quiet time", () => {
+    // "Looks ready" is signal-gated: a green/CLEAN PR with a review still in flight (review_in_progress)
+    // must NOT wake merge-ready even with a zero settle window — time is not the gate.
+    const GREEN = { key: "CI/test", name: "test", status: "COMPLETED", conclusion: "SUCCESS", details_url: "u" }
+    const base = { ...FAILING, merge_state_status: "CLEAN", review_decision: "APPROVED", threads: [], checks: [GREEN] }
+    const inprog = fetchFile(dir, "rip1.json", { ...base, review_in_progress: true })
+    expect(watch(path.join(dir, "rip1"), inprog, ["--settle-seconds", "0"]).reason).toBe("max-runtime")
+    const nosig = fetchFile(dir, "rip2.json", { ...base, review_in_progress: false })
+    expect(watch(path.join(dir, "rip2"), nosig, ["--settle-seconds", "0"]).reason).toBe("merge-ready")
+  })
+
   test("watch: a dispatched terminal-red check present at arm is a standing residual — kept watching, not re-woken", () => {
     // A failing check ce-debug marked dispatched leaves counts.ci == 0 while has_failing_checks stays
     // true. It was already surfaced when it was dispatched, so it is in the watch's arm-time baseline

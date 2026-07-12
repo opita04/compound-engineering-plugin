@@ -45,6 +45,10 @@ DISPOSITION_OPEN = "open"
 DISPOSITION_NEEDS_HUMAN = "needs-human"
 DISPOSITION_DISPATCHED = "dispatched"
 
+# A present in-progress review signal (👀) blocks a merge-ready read — but never terminally: after
+# this much quiet a stale/never-cleared signal is ignored so the PR can still be called ready.
+REVIEW_INPROGRESS_MAX_WAIT = 900
+
 # Pure CI/status bots whose top-level comments are never review feedback (coverage deltas,
 # deploy previews). Code-review bots (Codex, CodeRabbit, Greptile, etc.) are deliberately NOT
 # here — their comments ARE feedback and must reach ce-resolve-pr-feedback. Matched case-folded
@@ -137,7 +141,7 @@ def fetch(pr, repo):
     repo_args = ["--repo", repo] if repo else []
     view = _run_checked(["gh", "pr", "view", str(pr), *repo_args, "--json",
                          "state,mergeable,mergeStateStatus,reviewDecision,headRefOid,url,number,"
-                         "statusCheckRollup,author,comments,reviews"],
+                         "statusCheckRollup,author,comments,reviews,reactionGroups"],
                         "gh pr view")
     v = json.loads(view.stdout)
 
@@ -164,6 +168,14 @@ def fetch(pr, repo):
                 "details_url": c.get("detailsUrl"),
             })
 
+    # In-progress review signal: an 👀 (EYES) reaction on the PR body is how several review bots
+    # (Codex among them) announce a review is *underway* — a present in-progress signal means the PR
+    # is NOT settled, regardless of quiet time. A present signal is meaningful; absence tells us
+    # nothing (many reviewers give no signal), so this only ever *delays* a merge-ready read.
+    review_in_progress = any(
+        g.get("content") == "EYES" and (g.get("users") or {}).get("totalCount", 0) > 0
+        for g in v.get("reactionGroups") or [])
+
     owner, name, host = _resolve_repo_ref(repo, v.get("url"))
     head = v.get("headRefOid")
     return {
@@ -174,6 +186,7 @@ def fetch(pr, repo):
         "head_sha": head,
         "url": v.get("url"),
         "checks": checks,
+        "review_in_progress": review_in_progress,
         "threads": fetch_threads(pr, owner, name, host),
         # Non-thread feedback: top-level PR comments + review submission bodies. ce-resolve-pr-feedback
         # handles these too, so a Changes-Requested review body or an actionable top-level comment with
@@ -543,6 +556,7 @@ def diff(state, cur, now=None):
     state["review_decision"] = cur["review_decision"]
     state["mergeable"] = cur["mergeable"]
     state["merge_state_status"] = cur["merge_state_status"]
+    state["review_in_progress"] = cur.get("review_in_progress", False)
     state["tick"] = state.get("tick", 0) + 1
 
     actionable = {"ci": actionable_ci, "threads": actionable_threads, "comments": actionable_feedback}
@@ -577,6 +591,7 @@ def diff(state, cur, now=None):
         "checks_terminal": checks_terminal,
         "checks_present": bool(cur["checks"]),
         "all_checks_ok": all_checks_ok,
+        "review_in_progress": cur.get("review_in_progress", False),
         "checks_awaiting_approval": awaiting_approval,
         "blocked_external": blocked_external,
         "open_needs_human": open_needs_human,
@@ -598,7 +613,7 @@ def _change_sig(state):
     threads = {tid: _thread_identity(v) for tid, v in state.get("threads", {}).items()}
     feedback = {fid: v.get("disposition") for fid, v in state.get("feedback", {}).items()}
     return (checks, threads, feedback, state.get("review_decision"),
-            state.get("mergeable"), state.get("merge_state_status"))
+            state.get("mergeable"), state.get("merge_state_status"), state.get("review_in_progress"))
 
 
 def _elapsed(iso_str, now):
@@ -666,10 +681,16 @@ def _wake_reason(a, settle_seconds):
         # a dispatched check left terminally red (counts.ci is 0 — nothing new to dispatch) is a
         # blocker to hand back, not a reason to idle to max-runtime.
         return "blocked-failing"
-    # merge-ready candidate: only wake once the settle window has actually elapsed, so the agent
-    # is not roused every poll on a stable green PR that is merely waiting out its cooling-off.
+    # merge-ready candidate: green + settled AND no review in flight. An 👀-style in-progress signal
+    # means a review is underway, so the PR is NOT ready no matter how long it has been quiet — time
+    # is one component of "settled", not the gate. Honor the signal only up to a generous bound so a
+    # stale reaction that never clears cannot block ready forever (absence never blocks; presence
+    # only delays). Only wake once quiet has actually elapsed, so a stable green PR is not roused
+    # every poll while it cools off.
+    review_blocking = a.get("review_in_progress") and a.get("quiet_seconds", 0) < REVIEW_INPROGRESS_MAX_WAIT
     if (a.get("mergeable") == "MERGEABLE" and a.get("merge_state_status") == "CLEAN"
             and a.get("all_checks_ok") and a.get("checks_terminal")
+            and not review_blocking
             and a.get("quiet_seconds", 0) >= settle_seconds):
         return "merge-ready"
     return None
