@@ -150,7 +150,7 @@ function resolvePeers(
 }
 
 describe("cross-model-doc-review route safety (R17)", () => {
-  test("every route carries read-only / no-prompt / tool-less flags and no NEVER-use flag", () => {
+  test("every route carries read-only / no-prompt / least-privilege flags and no NEVER-use flag", () => {
     for (const route of ROUTES) {
       const cmd = emitAdapter(route)
       const tokens = cmd.split(/\s+/)
@@ -213,7 +213,7 @@ describe("cross-model-doc-review route safety (R17)", () => {
       const cmd = emitAdapter(route)
       for (const bad of NEVER_FLAGS) expect(cmd.split(/\s+/)).not.toContain(bad)
     }
-    // read-only / tool-less posture is present on every route regardless.
+    // read-only / least-privilege posture is present on every route regardless.
     expect(emitAdapter("codex")).toContain("-s read-only")
     expect(emitAdapter("claude")).toContain("--tools") // all built-ins disabled
     expect(emitAdapter("grok-cli")).toContain("--deny Read")

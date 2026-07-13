@@ -2,7 +2,7 @@
 # cross-model-doc-review.sh
 #
 # Runs ONE ce-doc-review judgment persona through ONE or more DIFFERENT model
-# PROVIDERS than the host (the "peer(s)") in separate, read-only, tool-less
+# PROVIDERS than the host (the "peer(s)") in separate, read-only, least-privilege
 # processes, and writes each peer's findings as JSON into the run dir. Each peer
 # gets the same canonical persona brief the in-process reviewer uses
 # (references/personas/<persona-file>.md) so it is genuinely "that persona, on a
@@ -85,7 +85,8 @@ M_GROK_CURSOR="grok-4.5-high"  # cursor-agent grok fallback (reasoning baked int
 M_COMPOSER="composer-2.5-fast" # cursor-agent composer (no high tier; -fast is the ceiling)
 
 # --- adapter argv (single source of truth for route flags) -----------------
-# Emits the CLI + flags one token per line. Read-only, no-prompt, tool-less, and
+# Emits the CLI + flags one token per line. Read-only, no-prompt, least-privilege
+# (tool-less on claude/grok; read-only residual on codex/cursor-agent), and
 # high-reasoning per R17. RUN_DIR / RAW_OUT / PROMPT_FILE / SCHEMA_REF are resolved
 # by the caller (placeholders in --emit-adapter mode). Peer routes write to RAW_OUT
 # only; the final fold-in file (OUT) is published after normalize so an orphaned
@@ -194,7 +195,7 @@ CONTEXT_SLOT_RULES="$(awk '/<context-slots-rules>/{f=1} f; /<\/context-slots-rul
 
 # The trio persona briefs defer their confidence rubric + false-positive catalog to
 # the template's <output-contract> block, which every in-process reviewer receives.
-# The tool-less peer can't resolve that reference on its own, so embed it too --
+# The isolated peer can't resolve that reference on its own, so embed it too --
 # otherwise the peer calibrates anchors / suppresses false positives differently from
 # its in-process twin, weakening the cross-model agreement signal (R13 parity).
 OUTPUT_CONTRACT_RULES="$(awk '/<output-contract>/{f=1} f; /<\/output-contract>/{if(f)exit}' "$TEMPLATE" 2>/dev/null)"
@@ -407,7 +408,7 @@ attempt_route() {   # <provider> <route>
     grok-cursor) note="$M_GROK_CURSOR" ;;
     composer)    note="$M_COMPOSER" ;;
   esac
-  log "peer run: provider=$provider route=$route model=$note lens=$REVIEWER_NAME read-only tool-less (idle ${IDLE_SECS}s / hard ${HARD_SECS}s)"
+  log "peer run: provider=$provider route=$route model=$note lens=$REVIEWER_NAME read-only least-privilege (idle ${IDLE_SECS}s / hard ${HARD_SECS}s)"
   case "$route" in
     codex)
       run_codex_cmd
