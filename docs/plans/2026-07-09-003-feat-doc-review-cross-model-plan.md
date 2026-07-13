@@ -13,11 +13,11 @@ execution: code
 
 ## Goal Capsule
 
-- **Objective:** Give ce-doc-review a cross-model pass that mirrors ce-code-review's design — run the conditional judgment lenses through a different model family so cross-model agreement promotes findings a single model would miss.
-- **Product authority:** Repo maintainer (product decisions confirmed in brainstorm).
-- **Execution profile:** Standard, software. Additive to an existing skill: one new script, one new reference, and wiring edits to `ce-doc-review`'s SKILL.md and synthesis reference. No converter or parser changes.
-- **Open blockers:** None. One implementation-time detail is deferred (how "high reasoning" is expressed on the Claude peer CLI).
-- **Product Contract preservation:** Product Contract unchanged — this enrichment adds Planning Contract, Implementation Units, Verification, and Definition of Done without altering any R-ID.
+- **Objective:** Give ce-doc-review a cross-model pass that runs the conditional judgment lenses through **one different model provider than the host** (auto-chosen from what's available, overridable), so a better-quality review is not biased by the single model of the current harness — a different-provider peer covers the host model's blind spots and its agreement promotes findings a single model would miss. A second provider is explicit opt-in, not the default.
+- **Product authority:** Repo maintainer (product decisions confirmed in brainstorm; the generalization from a fixed single peer to attested-provider auto-selection with override is a maintainer-directed enrichment, refined by a cross-model design review from codex + grok).
+- **Execution profile:** Standard, software, scoped to **ce-doc-review only** — `ce-code-review` and (later) `ce-simplify-code` adopting a shared contract are explicit follow-ups. Additive to an existing skill: a provider-selection + route-adapter script and wiring edits. No converter or parser changes.
+- **Open blockers:** None.
+- **Product Contract preservation:** Changed — **R7** (peer selection) generalized from a fixed host→peer map (Claude/Cursor→codex, Codex→claude) to **attest-host-provider-and-exclude + resolve one different-provider peer** (preference precedence + availability order), per maintainer direction. Added **R14–R19** (provider/route model, one-peer default + preference resolution + second-provider opt-in, attest-or-skip + explicit degradation, per-route read-only/high-reasoning recipe, generalized reviewer naming + non-apply fold-in, egress allowlist). All other product R-IDs preserved.
 
 ---
 
@@ -25,7 +25,7 @@ execution: code
 
 ### Summary
 
-Add a cross-model pass to ce-doc-review that mirrors ce-code-review's design: whichever of the conditional judgment trio — `adversarial-document-reviewer`, `product-lens-reviewer`, `security-lens-reviewer` — activated for a document also runs on a different model family in a read-only process, folding in as `<reviewer-name>-<peer>` where agreement with its in-process twin promotes the finding. The peer is tiered per lens, and the pass runs in both interactive and headless modes.
+Add a cross-model pass to ce-doc-review: whichever of the conditional judgment trio — `adversarial-document-reviewer`, `product-lens-reviewer`, `security-lens-reviewer` — activated for a document also runs on **one different model provider than the host** (auto-chosen from what's available, overridable via conversation/config/project-instructions; a second provider opt-in) in a read-only, tool-less process, folding in as `<reviewer-name>-<provider>` where agreement with its in-process twin promotes the finding by one anchor step (never auto-applied). The peer runs the provider's strong model at high reasoning across all activated lenses, in both interactive and headless modes.
 
 ### Problem Frame
 
@@ -36,7 +36,7 @@ ce-doc-review's judgment lenses run on a single model, so their blind spots are 
 - **Mirror code-review's mechanism, not only its idea.** Reuse the proven shape — same persona brief handed to the peer, same findings schema, fold-in as a distinct `<reviewer-name>-<peer>` reviewer, read-only peer, non-blocking self-bounding execution. ce-doc-review gets its own script (skills are self-contained units), but the design is the established one, not a new invention.
 - **Trio, not adversarial-only.** The cross-model pass covers the three conditional judgment lenses (`adversarial`, `product-lens`, `security-lens`) — the lenses whose output diverges most across model families, where agreement therefore carries real signal. The convergent lenses gain little from a second opinion.
 - **feasibility excluded to preserve the conditional cost profile.** `feasibility-reviewer` is judgment-heavy but always-on; including it would spawn the peer on every single review. Excluding it keeps the pass targeted to documents that activate a conditional judgment lens.
-- **Peer tiered per lens by the lever the lens rewards.** `security-lens` is knowledge-bound — flagship model breadth catches threat classes a mid model does not know exist — so it runs on the flagship at medium reasoning. `adversarial` and `product-lens` are reasoning-bound — deliberation, not world-knowledge, is the lever — so they run on a mid-capability model at high reasoning. This mirrors ce-doc-review's existing per-persona model tiering.
+- **Peer runs the provider's strong model at high reasoning across all lenses.** *(Revised from the original per-lens `sol`/`terra` tiering, which the maintainer replaced.)* The chosen different-provider peer runs every activated lens on one designated model at high reasoning — codex `gpt-5.6-sol`, claude `opus`, grok `grok-4.5`, composer `composer-2.5-fast` (composer's `-fast` tier is its ceiling). One strong independent model at high reasoning is the lever; the earlier knowledge-vs-reasoning per-lens split is superseded.
 - **Model identity is a principle, not a pin.** A cross-model pass inherently names a concrete different family (code-review's script already pins one), but concrete IDs go stale. The contract is the tier + reasoning level; the concrete IDs below are the current instance and a documented maintenance point.
 
 ```mermaid
@@ -44,14 +44,15 @@ flowchart TB
   D[Document under review] --> G{Any conditional judgment
   lens activated?}
   G -->|no| N[No cross-model pass]
-  G -->|yes| P[Run each activated trio member
-  on the peer, read-only]
-  P --> S[security-lens -> flagship / medium]
-  P --> A[adversarial -> mid / high]
-  P --> R[product-lens -> mid / high]
-  S --> F[Fold in as persona-peer]
-  A --> F
-  R --> F
+  G -->|yes| H{Attest host provider}
+  H -->|un-attestable| N
+  H -->|attested| P[Resolve ONE different-provider peer
+  pref: convo > config > instructions > availability
+  order codex,claude,grok,composer]
+  P --> S[Run each activated trio lens on the peer,
+  read-only, deny-Read, high reasoning]
+  S --> F[Fold in as lens-provider]
+  A[second provider: opt-in only] -.-> F
   F --> M{Shares fingerprint with
   in-process twin?}
   M -->|yes| Promote[Promote one anchor step:
@@ -69,13 +70,13 @@ flowchart TB
 
 **Peer model tiering**
 
-- R4. `security-lens` runs on the peer at flagship model tier, medium reasoning. Current mapping: `gpt-5.6-sol` at medium.
-- R5. `adversarial` and `product-lens` run on the peer at mid-capability model tier, high reasoning. Current mapping: `gpt-5.6-terra` at high (codex peer); the symmetric mid Claude tier at commensurate high effort when Claude is the peer.
-- R6. Peer model and reasoning are specified as a tier-plus-reasoning principle. The concrete IDs in R4 and R5 are the current instance and a maintenance point, not the contract.
+- R4. All activated trio lenses run on the selected peer's **single provider model at high reasoning** — one model per provider, not a per-lens split. Current mapping: codex `gpt-5.6-sol` + `model_reasoning_effort=high`; claude `opus` + `--effort high`; grok `grok-4.5` + `--effort high` (or `cursor-agent grok-4.5-high`); composer `composer-2.5-fast` (composer has no higher reasoning tier — its `-fast` tier is the ceiling, an accepted exception to the "high reasoning" default). (This supersedes the earlier per-lens `sol`/`terra`, flagship-vs-mid tiering, which the maintainer replaced with a strong-model-at-high-reasoning peer.)
+- R5. *(Superseded by R4.)* The earlier `adversarial`/`product-lens` → mid-capability + high-reasoning split is folded into R4's one-model-per-provider-at-high rule.
+- R6. Peer model and reasoning are a provider-model-plus-high-reasoning principle. The concrete IDs in R4 are the current instance and a single-edit maintenance point, not the contract; the reasoning-flag mechanism differs per CLI (see R17).
 
 **Peer selection and fold-in**
 
-- R7. Host and peer are chosen by runtime self-identification, reusing code-review's logic: Claude and Cursor prefer the codex peer, Codex prefers the claude peer; an unknown host skips the pass silently.
+- R7. The peer is chosen by attesting the host's own **provider** and excluding it (so the pass never self-reviews), then resolving **one** different-provider peer per the preference precedence and availability order in R15. An un-attestable host provider means the pass skips (R16), never a same-provider peer.
 - R8. Each cross-model result folds into synthesis as reviewer `<reviewer-name>-<peer>`, entering dedup and promotion exactly like an in-process reviewer return.
 - R9. A cross-model finding that shares a dedup fingerprint with its in-process twin (`<reviewer-name>`) promotes by one anchor step — the cross-model agreement signal.
 
@@ -85,6 +86,15 @@ flowchart TB
 - R11. The pass is non-blocking and self-bounding. Any failure — no peer, CLI missing or unauthenticated, timeout, or unparseable output — logs a reason and produces no fold-in. It never fails the review; a missing result is simply "no cross-model pass."
 - R12. The pass runs in both interactive and headless modes. On an interactive host it announces prominently, naming the peer and that the judgment lenses are running cross-model; in headless mode it runs silently.
 - R13. The peer receives the document content plus the `document_type` and `origin` context slots the in-process persona adapts on, so its behavior matches the in-process reviewer rather than misfiring on a re-classification.
+
+**Provider-family peer selection (generalization)**
+
+- R14. A **provider family** is the serving model provider that must differ from the host to count as cross-model — OpenAI (codex), Anthropic (claude), xAI (grok), Cursor (composer). A **route** is how a provider is invoked: its dedicated CLI, or `cursor-agent --model <model>`. Independence is by *provider*, not CLI brand. Route table: codex → `codex` CLI only; claude → `claude` CLI only; grok → `grok` CLI primary, else `cursor-agent --model grok-4.5-high`; composer → `cursor-agent --model composer-2.5-fast` only. `cursor-agent` is used ONLY to reach grok (fallback) and composer — never for OpenAI/Anthropic (redundant with the common-harness CLIs and, via cursor-agent, a same-provider egress).
+- R15. **Default: ONE cross-model peer**, resolved by this precedence — (1) a preference the user stated in conversation; (2) a `cross_model_peer:` key in `.compound-engineering/config.local.yaml`; (3) a preference already present in the agent's active project instructions (AGENTS.md/CLAUDE.md) — consumed from context, never read as a file; (4) default: the first **available** provider ≠ host by order `codex → claude → grok → composer`. A provider is available when any of its routes is installed, authenticated, and not rate-limited (grok = grok CLI OR `cursor-agent grok-4.5-high`). A **second** provider is explicit opt-in only (`CROSS_MODEL_MAX_PEERS`, default 1, clamped 0..2; config may not raise the hard cap); the default path is one peer, since one different-provider peer carries the proven signal and a second is a cost/egress multiplier, not a further bias reduction.
+- R16. The host **provider** is attested by the **orchestrator/skill** (which knows its own harness: Claude Code → anthropic; Codex → openai; Cursor → its *active* serving provider) and passed to the script as an explicit `host_provider` argument — the script does not guess the host. Likewise the resolved peer preference (from conversation / config / project-instructions, which only the skill has in context) is resolved by the skill and passed in; the script owns availability probing and fallback, not context resolution. If the host provider cannot be attested — e.g. Cursor on an undetectable model — the pass **skips (zero peers)** rather than risk a same-provider peer. Missing/partial availability and non-firing are scored target behavior, never an error: the pass adds only the peer it can reach and never blocks the review (extends R11), and degrades explicitly (never a silent hard failure, never a same-provider peer).
+- R17. The peer runs **read-only, headless, no permission prompt, at high reasoning, and TOOL-LESS** — least-privilege, since the peer reviews the document embedded in its prompt and needs no filesystem, web, MCP, or subagent tools. Deny every tool the route supports (not just Read), and run with the working dir set to the empty scratch run-dir (never the repo), so neither repo files nor network are an exfil path. Per-route recipe (model + high reasoning + read-only + no-tools + JSON): **codex** `exec -C <scratch> --skip-git-repo-check -s read-only -o OUT -m gpt-5.6-sol -c model_reasoning_effort="high"`; **claude** `-p --model opus --effort high --permission-mode dontAsk --disallowedTools Edit Write NotebookEdit Bash Task Read WebFetch WebSearch 'mcp__*' --json-schema S --output-format json --no-session-persistence`; **grok** `-p --model grok-4.5 --effort high --permission-mode dontAsk --deny Edit --deny Write --deny Bash --deny Task --deny Read --deny 'mcp__*' --json-schema S --output-format json`; **grok-via-cursor-agent** `-p --model grok-4.5-high --mode ask --trust --output-format json`; **composer** `-p --model composer-2.5-fast --mode ask --trust --output-format json`. Reasoning-flag mechanics differ per harness: codex `-c model_reasoning_effort=`; claude/grok `--effort`; cursor-agent bakes it into the model id (`grok-4.5-high`); **composer has only its `-fast` tier — no high-reasoning option, an accepted exception**. **Route-isolation caveat (residual — DECIDED: accept).** `cursor-agent --mode ask` is read-only but cannot fully disable its Read tool, so the cursor-agent routes (grok-fallback, composer) are a *weaker* isolation posture than the deny-Read CLIs. Maintainer decision: **accept this risk** for ce-doc-review's own-document threat model — the reviewed documents are the maintainer's own planning docs (low prompt-injection surface), and the host agent already runs in-repo with strictly more privilege than any peer, so a weaker peer isolation on those two routes does not add a materially new exposure. The cursor-agent routes are kept (not fail-closed); the residual is documented, not mitigated further. NEVER: codex without `-s read-only`; grok `--always-approve`/`--permission-mode bypassPermissions`; cursor-agent `-f`/`--force`/`--yolo`.
+- R18. Reviewer naming generalizes to `<lens>-<provider>` (e.g. `security-lens-codex`, `security-lens-grok`) so cross-model agreement promotion (R9) still fingerprints against the in-process `<lens>` twin regardless of which provider was selected. Peer-returned findings are treated as an independent reviewer for promotion but are **never auto-applied** (`safe_auto`) and never stack more than **one** anchor step of cross-model bonus even if multiple peers agree — the peer is a corroboration signal, not an apply authority.
+- R19. Provider selection restricts which providers may receive document content (`CROSS_MODEL_PEERS` allowlist), for egress governance. (The shared byte-duplicated invocation reference + parity test is **deferred** — see U7 — until `ce-code-review`/`ce-simplify-code` actually adopt it; a one-consumer parity test is tautological and does not test route safety.)
 
 ### Scope Boundaries
 
@@ -111,28 +121,62 @@ flowchart TB
 
 ### Key Technical Decisions
 
-- **KTD1. One peer invocation per activated persona, not a combined call.** Per-lens model tiering (R4/R5 — flagship for security, mid for adversarial/product) cannot be expressed in a single combined peer call, which would carry one model. Each activated trio persona gets its own peer invocation with its own model/reasoning, its own persona brief, and its own `<reviewer-name>-<peer>.json` return. This resolves the brainstorm's open invocation-shape question. Cost is bounded by R2's conditional gate — most documents activate zero or one trio member.
+- **KTD1. One peer invocation per activated lens, not a combined call.** Each activated trio lens gets its own peer invocation — because each carries its own persona brief and produces its own `<lens>-<provider>.json` return that folds in and fingerprints against its in-process twin. (All invocations now use the *same* provider model at high reasoning per R4, so the reason is per-lens *brief/return*, not per-lens *model* — the old per-lens model tiering is superseded.) Cost is bounded by R2's conditional gate — most documents activate zero or one trio member.
 - **KTD2. A doc-review-specific script, adapted from code-review's, not shared.** Per the repo's self-contained-skill rule (skills own their files; no cross-skill imports), the new script lives under `skills/ce-doc-review/scripts/` and self-locates its own personas and schema via `BASH_SOURCE`. It is modeled on `skills/ce-code-review/scripts/cross-model-adversarial-review.sh` but adapted for documents (see KTD3) and generalized over a persona-name argument.
 - **KTD3. Document delivery replaces diff delivery.** code-review threads a diff to the peer (codex fetches it in-sandbox; claude gets it embedded). doc-review's subject is a document already readable on disk (guaranteed by Phase 1's missing-document gate). The peer prompt embeds the document content plus the `document_type` and `origin` context slots directly — no base ref, no `git diff`, and no per-peer read/embed split — the content is embedded for **both** peers. codex's read-only sandbox is a safety property, not the delivery path.
 - **KTD4. Fold-in reuses the existing cross-persona agreement promotion (synthesis 3.4).** doc-review synthesis already promotes a merged finding by one anchor step when 2+ independent personas share its fingerprint. A `<reviewer-name>-<peer>` return counts as an independent persona, so agreement with the in-process `<reviewer-name>` promotes exactly as designed. The only synthesis change is to name this explicitly and render the Reviewer column as `<reviewer-name>, <reviewer-name>-<peer> (+1 anchor)`.
 - **KTD5. Distinct persona-file vs reviewer-name, plus soft-array backfill.** The doc-review findings schema top-level is `{reviewer, findings, residual_risks, deferred_questions}` (note `deferred_questions`, where code-review has `testing_gaps`). The script self-locates the persona brief from `references/personas/<persona-file>.md` (full basename, e.g. `adversarial-document-reviewer`) but forces the fold-in `reviewer` field to `<reviewer-name>-<peer>` (the short name the in-process persona emits — `adversarial`, `product-lens`, `security-lens` — per the mapping table). The two are passed as separate arguments; conflating them into one token breaks either persona-file resolution or the fold-in fingerprint match. The script also backfills `residual_risks`/`deferred_questions` to `[]` when the peer omits them, dropping the file if `findings` is not an array.
 
-### Host/Peer and Model Mapping
+### Peer Selection: One Attested Different-Provider Peer (R7, R14–R19)
 
-Runtime self-identification (reused from code-review's cross-model reference): Claude and Cursor hosts → `codex` peer; Codex host → `claude` peer; unknown host → skip silently.
+Host detection attests the host's own **provider** solely to exclude it; if it cannot be attested, the pass skips. The pass then resolves **one** different-provider peer by preference precedence, then availability order, preferring a dedicated CLI and using `cursor-agent` only to reach grok (fallback) or composer (sole route).
 
-| Persona file | Reviewer name | Lever | Codex peer (current) | Claude peer (current) |
-|---|---|---|---|---|
-| `security-lens-reviewer` | `security-lens` | knowledge-bound | `gpt-5.6-sol`, reasoning medium | `opus`, medium effort |
-| `adversarial-document-reviewer` | `adversarial` | reasoning-bound | `gpt-5.6-terra`, reasoning high | `sonnet`, high effort |
-| `product-lens-reviewer` | `product-lens` | reasoning-bound | `gpt-5.6-terra`, reasoning high | `sonnet`, high effort |
+**Preference precedence (first match wins):**
 
-The concrete IDs are the current instance of the tier principle (R6), centralized in one mapping in the script so the maintenance point is a single edit site. On the Claude peer the model tier is the sole differentiator — the `claude -p` CLI has no codex-style `model_reasoning_effort` flag (see Assumptions) — so the flagship-vs-mid model choice is what carries the security-vs-reasoning split. **Persona file vs reviewer name are distinct columns:** the script resolves the persona brief from `references/personas/<persona-file>.md` but forces the fold-in reviewer field to `<reviewer-name>-<peer>`, where `<reviewer-name>` is the short name the in-process persona emits (so agreement matches — see KTD5, U2, U4). The two are not interchangeable: `adversarial-document-reviewer` is the file; `adversarial` is the reviewer name.
+1. A preference the user **states in conversation**.
+2. `cross_model_peer:` in `.compound-engineering/config.local.yaml` (the only file the skill reads).
+3. A preference already in the agent's **project instructions** (AGENTS.md/CLAUDE.md) — consumed from context, never read as a file.
+4. **Default:** first available provider ≠ host, order `codex → claude → grok → composer`.
+
+**Provider × route (availability resolution):**
+
+| Provider | Primary route | Fallback route | cursor-agent? |
+|---|---|---|---|
+| OpenAI (codex) | `codex` CLI | — | No — redundant, and cursor-agent-gpt is same-provider egress |
+| Anthropic (claude) | `claude` CLI | — | No — redundant with common harness |
+| xAI (grok) | `grok` CLI | `cursor-agent --model grok-4.5-high` | Yes, fallback (maintainer's live case: grok CLI throttled) |
+| Cursor (composer) | `cursor-agent --model composer-2.5-fast` | — | Yes, sole route |
+
+**Default selection (host provider excluded, all routes healthy):**
+
+| Host provider | Excluded | One peer chosen |
+|---|---|---|
+| Claude Code (anthropic) | anthropic | codex → else grok → else composer |
+| Codex (openai) | openai | claude → else grok → else composer |
+| Cursor · attested Composer (cursor) | cursor | codex → else claude → else grok |
+| Cursor · attested GPT/Claude/Grok | that provider | first of order that isn't it |
+| Cursor · un-attestable | — | **skip (zero peers)** |
+
+`CROSS_MODEL_PEERS` overrides order/allowlist; `CROSS_MODEL_MAX_PEERS` (default 1, clamped 0..2, config can't raise the hard cap) gates an opt-in second provider.
+
+### Model + Reasoning per Route (verified per CLI)
+
+One model per provider at **high reasoning** across all activated lenses (supersedes the old per-lens `sol`/`terra` split). The reasoning flag differs per harness — verified against each CLI's help/model-list:
+
+| Provider | Route | Model | High reasoning |
+|---|---|---|---|
+| codex | `codex` CLI | `gpt-5.6-sol` | `-c model_reasoning_effort="high"` |
+| claude | `claude` CLI | `opus` (Opus 4.8) | `--effort high` |
+| grok | `grok` CLI | `grok-4.5` | `--effort high` (alias `--reasoning-effort`) |
+| grok | `cursor-agent` | `grok-4.5-high` | baked into the model id |
+| composer | `cursor-agent` | `composer-2.5-fast` | n/a — "fast" is its tier |
+
+The concrete IDs are the current instance of the tier principle (R6), in one in-script mapping. **cursor-agent has no `--effort` flag** — its reasoning level is encoded in the model id suffix, so the grok/composer-via-cursor routes carry the id directly. cursor-agent's structured output is `--output-format json` (no `--json-schema` constraint), so those routes parse findings from the JSON result and normalization (KTD5) still forces the `<lens>-<provider>` reviewer field. **Persona file vs reviewer name stay distinct:** the script resolves the brief from `references/personas/<persona-file>.md` but forces the fold-in reviewer to `<reviewer-name>-<provider>` (the short name the in-process persona emits, so agreement matches — KTD5, U2, U4). The persona-file is derived from the allowlisted reviewer-name inside the script, never a caller argument (no path-control surface).
 
 ### Assumptions
 
 - Codex reasoning effort is set via `-c model_reasoning_effort=<level>` and the model via `-m <id>`, following the existing code-review script's codex invocation.
-- The Claude peer differentiates by model tier alone (`opus` for security-lens, `sonnet` for adversarial/product) because the `claude -p` CLI has no codex-style `model_reasoning_effort` flag; if a build-time effort lever exists it is applied, but the tier is the guaranteed differentiator.
+- The `claude -p` CLI **does** have a reasoning lever — `--effort <low|medium|high|xhigh|max>` (verified) — so the Claude peer runs `--model opus --effort high` directly; the earlier assumption that it lacked a codex-style effort flag was wrong and is corrected. The grok CLI likewise has `--effort` (alias `--reasoning-effort`); cursor-agent has none (reasoning is in the model id, e.g. `grok-4.5-high`).
 - The cross-model pass does not thread `{decision_primer}` to the peer. Harmless for round-1 cross-model; in a round-2+ interactive session the peer would not honor prior-round rejections the in-process personas suppress. Deferred to implementation — acceptable because cross-model is most valuable on round 1, and synthesis's own R29/R30 suppression still applies to the folded-in findings.
 
 ---
@@ -141,11 +185,11 @@ The concrete IDs are the current instance of the tier principle (R6), centralize
 
 ### U1. Cross-model reference for ce-doc-review
 
-- **Goal:** The orchestrator-facing reference that decides whether the pass runs, which peer, per-lens tiering, and how results fold in — the doc-review analog of `skills/ce-code-review/references/cross-model-review.md`.
+- **Goal:** The orchestrator-facing reference that decides whether the pass runs, which provider peer, the provider-model mapping, and how results fold in — the doc-review analog of `skills/ce-code-review/references/cross-model-review.md`.
 - **Requirements:** R1, R2, R3, R6, R7, R8, R9, R11, R12.
 - **Dependencies:** none.
 - **Files:** `skills/ce-doc-review/references/cross-model-review.md` (new).
-- **Approach:** Mirror the structure of code-review's cross-model reference, adapted: (1) Gates — run only when at least one trio member (`adversarial-document-reviewer`, `product-lens-reviewer`, `security-lens-reviewer`) was activated in Phase 1, and the document is readable on disk (already guaranteed by Phase 1's missing-document gate; no remote-scope skip needed since there is no diff). (2) Host/peer runtime self-id (copy code-review's Step 1 union-of-env-markers logic). (3) Per-lens peer tiering table (from Planning Contract). (4) Invocation — launch one background script call per activated trio member in the same dispatch wave as the in-process reviewers (KTD1), collect before synthesis. (5) Announce rules — interactive host: one prominent line naming the peer and that the judgment lenses run cross-model; headless: no user-facing prose, but emit a one-line audit log that document content was sent cross-model to the named peer provider (the egress is silent to the user otherwise — see the third-party data-egress trust boundary). (6) Fold-in — read each `<reviewer-name>-<peer>.json`; a present file is one independent reviewer return entering synthesis 3.3/3.4; a missing file is "no cross-model pass" (never a failure). Anchor the script invocation with the `SKILL_DIR` pattern per the repo's tier-3 executed-shell convention.
+- **Approach:** Mirror the structure of code-review's cross-model reference, adapted: (1) Gates — run only when at least one trio member (`adversarial-document-reviewer`, `product-lens-reviewer`, `security-lens-reviewer`) was activated in Phase 1, and the document is readable on disk (already guaranteed by Phase 1's missing-document gate; no remote-scope skip needed since there is no diff). (2) Host-provider attestation + one-peer resolution (the preference precedence and availability order in R7/R15/U8 — NOT code-review's fixed host→peer map, which U8 replaces; un-attestable host → skip). (3) Per-provider model + high-reasoning mapping (from Planning Contract). (4) Invocation — launch one background script call per activated trio member in the same dispatch wave as the in-process reviewers (KTD1), collect before synthesis. (5) Announce rules — interactive host: one prominent line naming the peer and that the judgment lenses run cross-model; headless: no user-facing prose, but emit a one-line audit log that document content was sent cross-model to the named peer provider (the egress is silent to the user otherwise — see the third-party data-egress trust boundary). (6) Fold-in — read each `<reviewer-name>-<peer>.json`; a present file is one independent reviewer return entering synthesis 3.3/3.4; a missing file is "no cross-model pass" (never a failure). Anchor the script invocation with the `SKILL_DIR` pattern per the repo's tier-3 executed-shell convention.
 - **Patterns to follow:** `skills/ce-code-review/references/cross-model-review.md` (section shape, announce contract, non-blocking language, SKILL_DIR anchor).
 - **Test scenarios:** `Test expectation: none — orchestrator-facing prose reference. Behavioral correctness is validated by the U6 skill-creator eval, not bun test.`
 - **Verification:** The reference states each gate, the tiering table, the announce rules, and the fold-in contract; a reader can determine when the pass runs and how a return merges without opening the script.
@@ -156,7 +200,7 @@ The concrete IDs are the current instance of the tier principle (R6), centralize
 - **Requirements:** R1, R4, R5, R6, R7, R10, R11, R13; KTD1, KTD2, KTD3, KTD5.
 - **Dependencies:** U1 (defines the invocation contract the script implements).
 - **Files:** `skills/ce-doc-review/scripts/cross-model-doc-review.sh` (new).
-- **Approach:** Adapt `skills/ce-code-review/scripts/cross-model-adversarial-review.sh`. Signature: `cross-model-doc-review.sh <peer> <persona-file> <reviewer-name> <document-path> <document-type> <origin> <run-dir>` — `<persona-file>` and `<reviewer-name>` are distinct (KTD5). Self-locate `references/personas/<persona-file>.md` and `references/findings-schema.json` via `BASH_SOURCE`. Compose the peer prompt from the persona brief + a JSON-only contract carrying the embedded findings schema + a `<review-context>` block with `Document type:`, `Document path:`, `Origin:`, and the embedded document content (KTD3, R13). Resolve the per-lens model + reasoning from a single in-script mapping keyed on `<reviewer-name>` (R4/R5/R6). Run read-only per peer: codex `-s read-only -m <model> -c model_reasoning_effort=<level>` with the streaming idle/hard watchdog and process-group reap; claude `-p --model <model> --permission-mode dontAsk --disallowedTools Edit Write NotebookEdit Bash Task 'mcp__*' --max-turns 15 --no-session-persistence --json-schema <doc-review-schema> --output-format json` with the hard-cap timeout (R10 — carry `--max-turns`/`--no-session-persistence` from the reference for loop-bounding and no on-disk session state). Write `<run-dir>/<reviewer-name>-<peer>.json`. Normalize: force `reviewer = <reviewer-name>-<peer>`, backfill `residual_risks`/`deferred_questions` to `[]`, drop the file when `findings` is not an array (KTD5). Non-blocking throughout: every failure logs and `exit 0` with no output file (R11).
+- **Approach:** Adapt `skills/ce-code-review/scripts/cross-model-adversarial-review.sh`. Signature: `cross-model-doc-review.sh <peer> <reviewer-name> <document-path> <document-type> <origin> <run-dir>`. The persona-file is **derived inside the script** from the allowlisted `<reviewer-name>` (never a caller argument — no path-control surface), then self-located as `references/personas/<persona-file>.md` (plus `references/findings-schema.json`) via `BASH_SOURCE`. Compose the peer prompt from the persona brief + a JSON-only contract carrying the embedded findings schema + a `<review-context>` block with `Document type:`, `Document path:`, `Origin:`, and the embedded document content (KTD3, R13). Resolve the peer model + reasoning from a single in-script mapping keyed on the **selected provider** (R4/R6/R17 — one model at high reasoning per provider), not per lens. Run read-only, tool-less per peer: codex `-C <scratch> --skip-git-repo-check -s read-only -m <model> -c model_reasoning_effort=high` with the streaming idle/hard watchdog and process-group reap; claude `-p --model <model> --effort high --permission-mode dontAsk --disallowedTools Edit Write NotebookEdit Bash Task Read WebFetch WebSearch 'mcp__*' --max-turns 15 --no-session-persistence --json-schema <doc-review-schema> --output-format json` with the hard-cap timeout (R10, R17 — `Read`/web tools denied so the peer needs no repo access; `--max-turns`/`--no-session-persistence` bound loops and leave no on-disk session). Write `<run-dir>/<reviewer-name>-<peer>.json`. Normalize: force `reviewer = <reviewer-name>-<peer>`, backfill `residual_risks`/`deferred_questions` to `[]`, drop the file when `findings` is not an array (KTD5). Non-blocking throughout: every failure logs and `exit 0` with no output file (R11).
 - **Patterns to follow:** the code-review script's watchdog/reap, per-peer read-only split, stdout-recovery fallback, and reviewer-name normalization — reused near-verbatim; the diff-fetch block is replaced by document embedding.
 - **Test scenarios:**
   - Covers R11. Invalid peer (`''`, `foo`) → logs skip reason, exits 0, writes no file.
@@ -170,10 +214,10 @@ The concrete IDs are the current instance of the tier principle (R6), centralize
 ### U3. Wire the pass into ce-doc-review SKILL.md
 
 - **Goal:** Dispatch the cross-model pass in Phase 2 and fold its returns into Phases 3-5, gated on trio activation, in both modes.
-- **Requirements:** R1, R2, R7, R8, R12, R13.
-- **Dependencies:** U1, U2.
+- **Requirements:** R1, R2, R7, R8, R12, R13, R15, R16.
+- **Dependencies:** U1, U2, U8.
 - **Files:** `skills/ce-doc-review/SKILL.md`.
-- **Approach:** In Phase 2 (Dispatch), after persona selection: when at least one trio member was activated, load `references/cross-model-review.md` and launch one background script invocation per activated trio member in the same dispatch wave as the in-process reviewers, passing `document_type` (from Phase 1 classification), the document path, and `origin` (the same `{origin_path}` slot the in-process personas receive — R13). Add the announce line per U1 (interactive: prominent, names peer + judgment-lens cross-model coverage; headless: silent — R12). In the Phase 2 dispatch-limit note, clarify the script calls are CLI shell-outs that do not consume the subagent concurrency budget. In Phases 3-5, add the collect-and-fold step: before synthesis, read each `<reviewer-name>-<peer>.json` and treat a present file as an independent reviewer return entering the existing synthesis pipeline. Do not duplicate synthesis mechanics here — point to `references/synthesis-and-presentation.md` (U4).
+- **Approach:** In Phase 2 (Dispatch), after persona selection: when at least one trio member was activated, load `references/cross-model-review.md`, **attest the host provider** (from the running harness) and **resolve the peer preference** (conversation → config.local.yaml → project-instructions-in-context; only the skill has this context — R16), then launch one background script invocation per activated trio member in the same dispatch wave, passing the attested `host_provider` and ordered candidate providers plus `document_type` (Phase 1 classification), the document path, and `origin` (the same `{origin_path}` slot the in-process personas receive — R13). Skip the pass when the host provider is un-attestable. Add the announce line per U1 (interactive: prominent, names peer + judgment-lens cross-model coverage; headless: silent — R12). In the Phase 2 dispatch-limit note, clarify the script calls are CLI shell-outs that do not consume the subagent concurrency budget. In Phases 3-5, add the collect-and-fold step: before synthesis, read each `<reviewer-name>-<peer>.json` and treat a present file as an independent reviewer return entering the existing synthesis pipeline. Do not duplicate synthesis mechanics here — point to `references/synthesis-and-presentation.md` (U4).
 - **Patterns to follow:** code-review SKILL.md Stage 3 announce (line ~397) and Stage 4 launch (line ~550) prose; ce-doc-review's existing Phase 2 dispatch and Phases 3-5 handoff structure.
 - **Test scenarios:** `Test expectation: none — SKILL.md orchestration prose. Behavioral wiring (does the pass fire on the right activation, in both modes) is validated by the U6 skill-creator eval, per AGENTS.md "Validating Agent and Skill Changes".`
 - **Verification:** SKILL.md instructs launching the pass only when a trio member activated, threads `document_type`/`origin`, announces per mode, and folds returns into synthesis via the reference — with no cross-model mechanics inlined that would drift from U1/U4.
@@ -195,7 +239,7 @@ The concrete IDs are the current instance of the tier principle (R6), centralize
 - **Requirements:** advances the plan's stated behavior; no product R directly.
 - **Dependencies:** U1-U4 (describe shipped behavior).
 - **Files:** `docs/skills/ce-doc-review.md`; `README.md` (ce-doc-review inventory row, if it describes capabilities).
-- **Approach:** Add a cross-model section to `docs/skills/ce-doc-review.md` mirroring the treatment in `docs/skills/ce-code-review.md` — what the pass does, which lenses it covers, per-lens tiering rationale, non-blocking/read-only, both modes, and the third-party data-egress trust boundary (document content is sent to the peer model provider when the pass runs). Update the README inventory row only if it summarizes doc-review's review coverage. No skill/agent/command count changes (this adds files to an existing skill), so no `tests/release-metadata.test.ts` count bump.
+- **Approach:** Add a cross-model section to `docs/skills/ce-doc-review.md` mirroring the treatment in `docs/skills/ce-code-review.md` — what the pass does, which lenses it covers, the one-provider-model-at-high-reasoning rationale, non-blocking/read-only, both modes, and the third-party data-egress trust boundary (document content is sent to the peer model provider when the pass runs). Update the README inventory row only if it summarizes doc-review's review coverage. No skill/agent/command count changes (this adds files to an existing skill), so no `tests/release-metadata.test.ts` count bump.
 - **Patterns to follow:** the cross-model prose already in `docs/skills/ce-code-review.md`.
 - **Test scenarios:** `Test expectation: none — documentation only.`
 - **Verification:** `docs/skills/ce-doc-review.md` describes the cross-model pass; README stays consistent.
@@ -210,6 +254,36 @@ The concrete IDs are the current instance of the tier principle (R6), centralize
 - **Test scenarios:** the eval cases above ARE the test scenarios. `Execution note:` this is a validation deliverable, not runtime code — its "tests" are its eval assertions, run via skill-creator.
 - **Verification:** the skill-creator eval passes on the current source; a routine validated-upstream plan with no trio activation triggers no peer call.
 
+### U7. Route-safety isolation test (shared reference deferred)
+
+- **Goal:** Test the real safety surface — the executable route adapters — with a malicious-document fixture, rather than a byte-parity test of prose. The shared byte-duplicated `cross-model-invocation.md` + `CONSUMER_SKILLS` parity test is **deferred** until a second skill (`ce-code-review`/`ce-simplify-code`) actually adopts it: a one-consumer byte-parity test is tautological and, per the codex+grok design review, byte identity catches prose drift but does not prove route safety.
+- **Requirements:** R17, R18.
+- **Dependencies:** U8 (the adapters under test).
+- **Files:** `skills/ce-doc-review/scripts/` test fixtures (a malicious-document fixture); the script's own bun-testable assertions.
+- **Approach:** (1) Static adapter-flag assertions: each route's emitted command contains its read-only + no-prompt + deny-Read flags and NONE of the NEVER-use flags (R17). (2) Isolation behavior: feed a fixture document whose text tries to make the peer read a repo file and return it, and confirm the adapter's flags would deny that (deny-Read / read-only), documenting the peer's least-privilege posture. (3) Guard against two sources of truth — the model+reasoning mapping lives once in the script; U1's reference points to it rather than restating the ids, so the reference and script cannot drift.
+- **Patterns to follow:** the existing `cross-model-doc-review.sh` skip-path stubs; the codex+grok review's "parity-test executable artifacts, not prose" recommendation.
+- **Test scenarios:**
+  - Each route's adapter command string carries the R17 read-only/no-prompt/deny-Read flags and none of the NEVER-use flags.
+  - A malicious-document fixture does not cause the adapter to grant Read/write/network-write privileges (verified over the emitted command + read-only posture).
+  - `Execution note:` static/emitted-command assertions run in CI; live peer behavior defers to U6.
+- **Verification:** the adapter-flag and isolation assertions pass; a future shared-reference extraction is a separate follow-up when a second consumer lands.
+
+### U8. Provider attestation, one-peer resolution, and route adapters
+
+- **Goal:** Extend `cross-model-doc-review.sh` (and its U1 reference) from a single fixed host→peer map to attested-host-provider exclusion + one-peer resolution, with per-route read-only high-reasoning adapters for the grok CLI and `cursor-agent` (grok fallback + composer) alongside the existing codex/claude routes.
+- **Requirements:** R7, R14, R15, R16, R17, R18.
+- **Dependencies:** U1, U2.
+- **Files:** `skills/ce-doc-review/scripts/cross-model-doc-review.sh`; `skills/ce-doc-review/references/cross-model-review.md`.
+- **Approach:** Split the context-dependent resolution (owned by the skill, U3) from execution (owned by the script). **The skill (U3)** attests the host provider (it knows its own harness) and resolves the peer preference from conversation / `.compound-engineering/config.local.yaml` `cross_model_peer:` / project-instructions-already-in-context, then passes the script an explicit `host_provider` and the ordered candidate providers (R16 — the script cannot read the conversation or system prompt). **The script** then: (1) excludes `host_provider`; un-attestable/absent → skip (R16). (2) Walks the passed candidate order and picks the first *available* provider: attempt its preferred route, fall back to its allowed alternate (grok CLI → `cursor-agent grok-4.5-high`) only on a **classified failure** — not-installed (`command -v` fails), unauthenticated (auth error), or rate-limited (provider throttle signal); `command -v` alone is necessary, not sufficient. Record the resolved provider+route+classified-failure reasons in an auditable run line. (3) **Add read-only high-reasoning adapters** per R17 for grok (`-p --model grok-4.5 --effort high --permission-mode dontAsk --deny … --deny Read`), grok-via-cursor-agent (`-p --model grok-4.5-high --mode ask --trust`), and composer (`-p --model composer-2.5-fast --mode ask --trust`); add `--deny Read` to grok and `Read` to claude's `--disallowedTools` (least-privilege — the peer needs no file reads); keep codex's `--skip-git-repo-check -s read-only`. (4) One model+reasoning mapping per provider in the script (single edit site; supersedes the sol/terra per-lens split); generalize the `<peer>` arg/reviewer field to `<provider>` (R18). (5) Fold-in stays a corroboration-only signal: peer findings never `safe_auto`, cross-model bonus capped at one anchor step (R18). (6) An opt-in second provider (`CROSS_MODEL_MAX_PEERS=2`) resolves a second different provider by the same order; default stays one. Reference (U1) points to this algorithm and the in-script mapping — it does not restate the ids (single source of truth). Everything non-blocking (R16) and read-only (R17).
+- **Patterns to follow:** the existing codex/claude adapters in `cross-model-doc-review.sh`; the verified per-route recipe table in R17.
+- **Test scenarios:**
+  - Covers R7/R15. With a stubbed availability probe, each host provider resolves the expected one peer (matches the default selection table); conversation/config/instruction preference overrides the default order.
+  - Covers R16. Un-attestable host provider → zero peers, skip; no different provider reachable → skip silently, exit 0, no file.
+  - Covers R17. Each route adapter string carries its read-only/no-prompt/deny-Read flags at high reasoning (codex `model_reasoning_effort=high`; claude/grok `--effort high`; cursor-agent id-encoded), and none of the NEVER-use flags (static assertion over the emitted command).
+  - Covers R18. A stubbed grok/cursor-agent JSON result normalizes to `reviewer:"<lens>-<provider>"`; a peer finding is never emitted as `safe_auto` and never adds more than one anchor step.
+  - `Execution note:` live grok/cursor-agent calls cannot run in CI; exercise attestation, resolution, availability-fallback, adapter-flag, and normalization paths with stubs; defer end-to-end behavior to U6.
+- **Verification:** attestation excludes the right provider (or skips); resolution honors preference precedence then availability order; adapters are read-only, prompt-free, deny-Read, and high-reasoning; normalization forces `<lens>-<provider>`; the pass stays non-blocking when the provider is missing.
+
 ---
 
 ## Verification Contract
@@ -221,6 +295,8 @@ The concrete IDs are the current instance of the tier principle (R6), centralize
 | Script skip paths | `bash skills/ce-doc-review/scripts/cross-model-doc-review.sh` with invalid/missing inputs | U2 | Exit 0, no output file, logged reason |
 | Script normalization | run the script's normalization over a fixture stdout JSON via `jq` | U2 | Output is exactly `{reviewer:"<reviewer-name>-<peer>", findings, residual_risks, deferred_questions}` |
 | Behavioral wiring | `skill-creator` eval on ce-doc-review (activation gate, both modes, per-lens dispatch, fold-in + promotion) — authored/run by U6 | U1, U2, U3, U4 | Eval confirms the pass fires on trio activation only, threads context slots, and promotes on cross-model agreement |
+| Route safety / isolation | adapter-flag + malicious-document assertions | U7 | Each route's emitted command carries read-only/no-prompt/deny-Read flags and none of the NEVER-use flags; a malicious document does not grant the peer Read/write privileges |
+| Attestation + one-peer resolution | stubbed-availability selector + preference-precedence assertions | U8 | Host provider attested-and-excluded (or skip); resolution honors conversation→config→instruction→availability order; one peer by default, `CROSS_MODEL_MAX_PEERS` gates a second; missing provider skips cleanly |
 
 The skill-creator eval is the load-bearing behavioral gate: `bun test` does not exercise SKILL.md/reference prose, and plugin skill definitions cache at session start, so in-session dispatch tests pre-edit content (AGENTS.md "Validating Agent and Skill Changes").
 
@@ -229,9 +305,24 @@ The skill-creator eval is the load-bearing behavioral gate: `bun test` does not 
 ## Definition of Done
 
 - The cross-model pass runs one peer invocation per activated trio member, gated on that member's existing activation (R1, R2), and never on the excluded lenses (R3).
-- Per-lens peer tiering is applied from a single in-script mapping (R4, R5, R6).
+- The selected peer runs all activated lenses on one provider model at high reasoning, from a single in-script provider→model mapping (R4, R6; R5 superseded).
 - Host/peer self-id, read-only execution, and non-blocking self-bounding behavior match code-review's guarantees (R7, R10, R11).
 - Each return folds in as `<reviewer-name>-<peer>` and promotes by one anchor step on agreement with its in-process twin (R8, R9, KTD4).
 - The pass runs and announces correctly in both interactive and headless modes, threading `document_type` and `origin` to the peer (R12, R13).
 - `bun test` and `bun run release:validate` pass; the script skip and normalization paths verify; the skill-creator eval confirms the behavioral wiring.
 - Docs updated (U5).
+- **Generalization:** the pass attests the host provider and excludes it (skips if un-attestable), then resolves **one** different-provider peer by preference precedence (conversation → config.local.yaml → project-instruction-in-context → availability order `codex→claude→grok→composer`), with a second provider opt-in only (R7, R14–R16); the peer runs read-only, headless, prompt-free, deny-Read, at high reasoning per the verified per-route recipe with no NEVER-use flag (R17); returns fold in as `<lens>-<provider>`, never `safe_auto`, capped at one anchor step (R18); `cursor-agent` is used only for grok-fallback/composer; `CROSS_MODEL_PEERS` governs egress (R19).
+
+---
+
+## Open Questions
+
+**Resolved by the cross-model design review (codex + grok) and maintainer direction:**
+
+- **OQ1 — RESOLVED: one peer by default.** The earlier "up to two, per-lens vs total" fork is moot: the default is **one different-provider peer**. One peer carries the proven cross-model signal; a second is a cost/egress multiplier, so it is explicit opt-in only (`CROSS_MODEL_MAX_PEERS`, default 1). When the opt-in second provider IS enabled, both peers run every activated lens (the peer runs the lenses that activated; selection is per document, not per lens).
+- **OQ2 — RESOLVED: attest the host provider or skip.** Cursor's ambiguity is handled by attesting its *active serving provider* and excluding that; if it cannot be attested, the pass skips (zero peers) rather than defaulting to exclude only `composer` and risk a same-provider peer (which would silently defeat cross-model independence).
+
+**Deferred (out of this plan's scope):**
+
+- **Shared invocation reference + parity test** — deferred until a second consumer adopts it (U7); a one-consumer byte-parity test is tautological and does not test route safety.
+- **`ce-code-review` / `ce-simplify-code` adoption** of the provider-selection contract — explicit follow-ups. `ce-code-review` already anchors codex `-C` at the git repo root, so it needs no codex behavior change to adopt.
