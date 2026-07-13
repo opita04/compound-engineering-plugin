@@ -191,6 +191,14 @@ TEMPLATE="$SKILL_ROOT/references/subagent-template.md"
 CONTEXT_SLOT_RULES="$(awk '/<context-slots-rules>/{f=1} f; /<\/context-slots-rules>/{if(f)exit}' "$TEMPLATE" 2>/dev/null)"
 [ -n "$CONTEXT_SLOT_RULES" ] || log "context-slot rules not found in $TEMPLATE; peer prompt will omit unified/Origin adaptation rules"
 
+# The trio persona briefs defer their confidence rubric + false-positive catalog to
+# the template's <output-contract> block, which every in-process reviewer receives.
+# The tool-less peer can't resolve that reference on its own, so embed it too --
+# otherwise the peer calibrates anchors / suppresses false positives differently from
+# its in-process twin, weakening the cross-model agreement signal (R13 parity).
+OUTPUT_CONTRACT_RULES="$(awk '/<output-contract>/{f=1} f; /<\/output-contract>/{if(f)exit}' "$TEMPLATE" 2>/dev/null)"
+[ -n "$OUTPUT_CONTRACT_RULES" ] || log "output-contract not found in $TEMPLATE; peer prompt omits the shared confidence rubric / FP catalog (calibration may differ from the twin)"
+
 # --- resolve which provider(s) to run (exclude host, allowlist, availability) --
 ALLOW="${CROSS_MODEL_PEERS:-}"                 # optional egress allowlist (R19)
 MAX_PEERS="${CROSS_MODEL_MAX_PEERS:-1}"        # default 1; clamped 0..2 (hard cap)
@@ -277,6 +285,9 @@ DOC_BASENAME="$(basename "$DOC_PATH")"
 {
   cat "$PERSONA"
   printf '\n\n---\n\n'
+  # Shared output-contract (confidence rubric + FP catalog) the persona brief defers
+  # to, so the peer calibrates like its in-process twin.
+  [ -n "$OUTPUT_CONTRACT_RULES" ] && printf '%s\n\n' "$OUTPUT_CONTRACT_RULES"
   printf 'This is an authorized document review of the maintainer\047s own repository.\n'
   printf 'Return ONE JSON object and nothing else (no prose, no code fence) matching this schema:\n\n'
   printf '%s' "$SCHEMA_CONTENT"
