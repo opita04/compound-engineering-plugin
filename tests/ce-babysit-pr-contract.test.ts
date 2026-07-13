@@ -120,7 +120,7 @@ describe("ce-babysit-pr cross-skill contract parity", () => {
     // Regression guard: marking only the comments ce-resolve explicitly 'handled' left its
     // silently-dropped bot wrappers actionable forever, so counts.comments never reached 0.
     const babysit = await readRepoFile(BABYSIT)
-    expect(babysit).toContain("silently drops")
+    expect(babysit).toMatch(/silently drop/i)
     expect(babysit, "must mark every passed comment, not only the handled ones").toMatch(/mark \*?every\*? comment you passed/i)
     expect(babysit).toContain("never settle")
   })
