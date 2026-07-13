@@ -474,10 +474,17 @@ run_provider() {   # <provider>
       fi
       ;;
   esac
+  # Track the route that actually produced the fold-in, so the artifact records
+  # whether a grok return went out directly (grok-cli -> xAI) or through Cursor
+  # (grok-cursor -> Cursor also received the full document). The <lens>-<provider>
+  # filename alone can't encode that, so the egress disclosure would otherwise miss
+  # the Cursor hop in the grok-CLI-failure fallback case.
+  ACTUAL_ROUTE="$primary"
   attempt_route "$provider" "$primary"
   if out_missing_or_invalid && [ -n "$fallback" ]; then
     log "grok primary route (grok CLI) produced no usable output (not-installed/unauth/rate-limited/failed); classified-failure fallback -> $fallback"
     attempt_route "$provider" "$fallback"
+    ACTUAL_ROUTE="$fallback"
   fi
 
   # --- normalize + validate against the synthesis reviewer-return contract ---
@@ -496,9 +503,10 @@ run_provider() {   # <provider>
   rm -f "$OUT"
   if [ -s "$RAW_OUT" ]; then
     _norm="$(mktemp "${TMPDIR:-/tmp}/xmodel-doc-norm-XXXXXX")"
-    if jq --arg r "$REVIEWER_NAME-$provider" \
+    if jq --arg r "$REVIEWER_NAME-$provider" --arg route "$ACTUAL_ROUTE" \
          'if (.findings|type)=="array"
           then { reviewer: $r,
+                 cross_model_route: $route,
                  findings: [ .findings[] | if (.autofix_class? == "safe_auto") then .autofix_class = "gated_auto" else . end ],
                  residual_risks: (.residual_risks // []),
                  deferred_questions: (.deferred_questions // []) }

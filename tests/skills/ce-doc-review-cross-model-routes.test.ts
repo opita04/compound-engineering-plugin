@@ -369,6 +369,8 @@ describe("cross-model-doc-review normalization (R18, KTD5)", () => {
     expect(out.residual_risks).toEqual([])
     expect(out.deferred_questions).toEqual([])
     expect(Array.isArray(out.findings)).toBe(true)
+    // The artifact records the actual route so the egress disclosure can reconcile it.
+    expect(out.cross_model_route).toBe("claude")
   })
 
   test("drops the return when findings is not an array", () => {
@@ -450,6 +452,25 @@ describe("cross-model-doc-review run-loop failover (R15, R16)", () => {
     expect(r.code).toBe(0)
     expect(r.files).toContain("adversarial-grok.json")
     expect(r.files).not.toContain("adversarial-claude.json")
+  })
+
+  test("records the grok-cursor route when the grok CLI fails and cursor-agent succeeds (egress disclosure)", () => {
+    // grok CLI installed but 'unauthenticated' (fails); the grok-cursor fallback
+    // succeeds, so Cursor actually received the document. The <lens>-grok.json name
+    // can't encode that, so the artifact must carry cross_model_route=grok-cursor for
+    // the egress reconciliation to name the Cursor hop.
+    const { bin, env } = sandbox(["grok", "cursor-agent"])
+    writeFileSync(path.join(bin, "grok"), failStub)
+    chmodSync(path.join(bin, "grok"), 0o755)
+    writeFileSync(path.join(bin, "cursor-agent"), okStub)
+    chmodSync(path.join(bin, "cursor-agent"), 0o755)
+    const doc = makeDoc()
+    const runDir = makeRunDir()
+    const r = run(["codex", "grok", "adversarial", doc, "plan", "none", runDir], runDir, env)
+    expect(r.code).toBe(0)
+    expect(r.files).toContain("adversarial-grok.json")
+    const out = JSON.parse(readFileSync(path.join(runDir, "adversarial-grok.json"), "utf8"))
+    expect(out.cross_model_route).toBe("grok-cursor")
   })
 })
 
