@@ -460,6 +460,43 @@ describe("peer-job-runner lifecycle", () => {
     )
   }, 20000)
 
+  test("reap honors a result the worker published after the supervisor died", () => {
+    // Regression: if the supervisor dies mid-run and the worker THEN publishes
+    // its declared result and exits, cmd_reap's fallback must classify from the
+    // artifact (done), not discard it as died-without-result — else `result`
+    // exits 3 on a job that actually succeeded.
+    const root = makeRoot()
+    const env = { ...FAST, CE_PEER_GRACE_SECS: "1" }
+    const coord = mkTempRoot("peer-reap-result-")
+    const resultPath = path.join(coord, "out.json")
+    const gate = path.join(coord, "gate")
+    writeFileSync(gate, "") // gate present => worker waits before publishing
+    const stub = writeStub(
+      `while [ -e "${gate}" ]; do sleep 0.1; done\n` +
+        `printf '{"ok":true}' > "${resultPath}"\n` +
+        `exit 0\n`,
+    )
+    const { id, dir } = startJob(root, env, [stub], { resultPath })
+    const pids = trackJob(dir)
+    expect(pids).not.toBeNull()
+
+    // Kill the supervisor BEFORE it can classify, then let the worker publish
+    // its result and exit — the exact ordering the fallback must handle.
+    spawnSync("kill", ["-9", String(pids!.supervisor_pid)])
+    rmSync(gate, { force: true })
+    const dl = Date.now() + 5000
+    while (pidAlive(pids!.worker_pid) && Date.now() < dl) Bun.sleepSync(50)
+    expect(pidAlive(pids!.worker_pid)).toBe(false)
+
+    expect(runner(root, env, ["reap", id]).code).toBe(0)
+    // Classified from the published artifact, not died-without-result.
+    expect(runner(root, env, ["status", id]).stdout.trim()).toBe("done")
+    // ...and `result` emits it rather than exiting 3.
+    const r = runner(root, env, ["result", id])
+    expect(r.code).toBe(0)
+    expect(r.stdout).toContain('{"ok":true}')
+  }, 20000)
+
   test("result --path: verified read emits the exact file bytes; missing file exits 3", () => {
     const root = makeRoot()
     const artifact = path.join(mkTempRoot("peer-path-"), "artifact.txt")

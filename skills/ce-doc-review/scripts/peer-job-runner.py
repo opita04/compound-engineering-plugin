@@ -885,7 +885,33 @@ def cmd_reap(args) -> int:
     worker_leader_alive = False
     if isinstance(worker_pid, int):
         worker_leader_alive = kill_tree(worker_pid, min(conf["grace"], 1.0))
-    if worker_leader_alive:
+    # A worker can publish its declared result and exit before this fallback runs
+    # (e.g. the supervisor died mid-run, then the worker completed cleanly). Honor
+    # that result instead of discarding it as died-without-result: read the
+    # declared result_path and classify from the artifact, mirroring
+    # classify_exit. Only with no usable result do we fall back to timeout (leader
+    # was alive) / died-without-result (leader gone).
+    result_path = None
+    try:
+        meta = json.loads(read_owned(os.path.join(job_dir, "meta.json"), META_READ_CAP))
+        result_path = meta.get("result_path") if isinstance(meta, dict) else None
+    except (Unreadable, OSError, ValueError):
+        result_path = None
+    result_size = None
+    if result_path:
+        try:
+            st = os.lstat(result_path)
+            if stat.S_ISREG(st.st_mode) and st.st_size > 0:
+                result_size = st.st_size
+        except OSError:
+            pass
+    if result_size is not None and result_size > conf["result_max"]:
+        word, reason = "failed", (
+            f"result exceeded byte cap ({result_size} > {conf['result_max']} bytes)"
+        )
+    elif result_size is not None:
+        word, reason = "done", "worker published its result before reap (supervisor was gone)"
+    elif worker_leader_alive:
         word, reason = "timeout", (
             "reaped by request; supervisor was gone, worker tree killed by reap"
         )
