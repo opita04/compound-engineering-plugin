@@ -112,6 +112,10 @@ When the skill runs on a branch with an open PR and you want the description rew
 
 Agent-driven development removed the learning that writing code by hand used to provide. When the composition pass judges that the change introduces a concept new to the codebase — checked against the base ref, never the working tree, so the PR's own code doesn't mask novelty — the description gains a dedicated `## New concepts` section: what the concept is, why it was chosen here over the obvious alternative, and one example from this PR's behavior. Absence is the common case by design: established repo patterns, refactors, renames, and dependency bumps never fire it. After the PR ships, a one-line offer points to `/ce-explain` for interactive learning, and an opt-in config key (`pr_teaching_archive`) archives the explainer to `docs/explainers/` and links it from the PR. Turn the whole feature off per repo with `pr_teaching_section: false` in `.compound-engineering/config.local.yaml`.
 
+### 11. Session-settled provenance line
+
+When a labeled plan is in hand, the PR body gains one static line naming which decisions were session-settled and their classes, so a reviewer sees at a glance what the user already decided and chose over what. Runs with no plan omit it.
+
 ---
 
 ## Quick Example

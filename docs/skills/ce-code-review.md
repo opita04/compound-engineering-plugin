@@ -117,6 +117,10 @@ When autofix mode runs and the in-skill fixer can't resolve everything, the resi
 
 Compound-engineering pipeline artifacts (`docs/brainstorms/*` legacy/evidence artifacts, `docs/plans/*.{md,html}` unified plans, `docs/solutions/*.md`) are protected — reviewers' findings to delete or gitignore them are discarded during synthesis. These are decision artifacts the pipeline depends on; reviewers shouldn't garbage-collect them.
 
+### 9. Settled-decision triage — preference versus defect
+
+When the discovered plan carries `session-settled:` KTDs, synthesis routes a finding that merely prefers a different approach to the report-only queue with a `settled_conflict` stamp naming the KTD — in every mode, interactive apply included, so a decision the user already made is never gate-dropped for reviewer taste. A real defect inside a settled approach keeps its full severity, and evidence that a settled decision cannot work is surfaced prominently (so an upstream pipeline gate can halt on it). Reviewers themselves stay blind to the annotations — they're excluded from reviewer bundles and the intent summary, including the cross-model adversarial pass — and the orchestrator triages post-hoc, so no lens is anchored by knowing a choice was already blessed.
+
 ---
 
 ## Quick Example

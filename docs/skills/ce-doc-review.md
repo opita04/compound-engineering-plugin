@@ -126,6 +126,10 @@ Alongside those focused twins, a single **whole-document sweep** has one differe
 
 **Trust boundary:** the pass embeds the full document content into the peer prompt and sends it to an external model provider (OpenAI, Anthropic, xAI, or Cursor, depending on the resolved peer); `CROSS_MODEL_PEERS` restricts which providers may receive content (unset = default order; set = allowlist). The peer runs strictly read-only, from an empty scratch dir with no project context — every route denies writes, network, MCP, and subagents. On **reads**, the routes are two tiers: **truly tool-less** — claude (`--bare --tools ""`, all built-ins disabled, no CLAUDE.md/MCP auto-discovery) and grok (denies `Read`/`Edit`/`Write`/`Bash`/`Task`/web/`mcp__*`), with no read tool at all; and **read-only residual** — codex (`-s read-only`) and cursor-agent (`--mode ask --sandbox enabled`), which still permit a read tool (codex also read-only shell exec). So impact is bounded to disclosure rather than repo mutation, and the script emits a one-line audit log of each cross-model send so the egress is auditable even in headless mode. Peer prompts use basename-only document paths (content is already embedded). Over-size documents skip cleanly rather than truncating. The read residual on the codex/cursor-agent routes is **accepted** for the own-document threat model: the reviewed doc is the maintainer's own, and the host agent already runs in-repo with more privilege than any peer, so a peer that can read a file adds no material exposure.
 
+### 10. Settled-decision protection
+
+Decisions the user examined and settled carry a `session-settled:` annotation, and `ce-doc-review` treats it as protected content: the safe-auto pass never strips it, and a persona that wants to challenge a settled decision must frame the challenge as infeasibility, not preference — surfaced for decision, never auto-applied.
+
 ---
 
 ## Quick Example
