@@ -179,6 +179,22 @@ describe("repo-profile-cache helper", () => {
     expect(run(dir, "get").stdout.startsWith("MISS\n")).toBe(true)
   })
 
+  test("editing final target of a symlink chain → MISS", () => {
+    const dir = makeRepo()
+    mkdirSync(path.join(dir, "docs"))
+    writeFileSync(path.join(dir, "docs", "README.md"), "# final v1\n")
+    spawnSync("ln", ["-s", "README.md", path.join(dir, "docs", "link.md")])
+    spawnSync("rm", ["-f", path.join(dir, "README.md")])
+    spawnSync("ln", ["-s", "docs/link.md", path.join(dir, "README.md")])
+    git(dir, "add", "-A")
+    git(dir, "commit", "-q", "-m", "symlink chain README")
+    putProfile(dir)
+    writeFileSync(path.join(dir, "docs", "README.md"), "# final v2\n")
+    git(dir, "add", "-A")
+    git(dir, "commit", "-q", "-m", "edit chain final target")
+    expect(run(dir, "get").stdout.startsWith("MISS\n")).toBe(true)
+  })
+
   test("dirty symlink target of a profile input → MISS", () => {
     const dir = makeRepo()
     mkdirSync(path.join(dir, "docs"))

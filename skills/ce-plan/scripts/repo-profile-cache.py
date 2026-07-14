@@ -255,9 +255,48 @@ def _resolve_symlink_target(link_path: str, target: str) -> "str | None":
     return resolved
 
 
-def profile_input_symlink_targets() -> "set[str] | None":
-    """In-repo paths that profile-input symlinks at HEAD resolve to.
+def _follow_symlink_chain(
+    start_path: str,
+    by_path: "dict[str, tuple[str, str, str]]",
+) -> "tuple[str, str, set[str]] | None":
+    """Follow symlink chain from start_path to a regular blob.
 
+    Returns (final_path, final_blob_sha, intermediate_paths) where
+    intermediate_paths are every symlink path visited after start (not including
+    start or the final regular file). None if the chain cannot be resolved
+    (missing entry, cycle, escaped tree, or non-blob).
+    """
+    seen: set[str] = set()
+    path = start_path
+    intermediates: set[str] = set()
+    for _ in range(32):
+        if path in seen:
+            return None
+        seen.add(path)
+        entry = by_path.get(path)
+        if entry is None:
+            return None
+        mode, typ, obj = entry
+        if typ != "blob":
+            return None
+        if mode != "120000":
+            return path, obj, intermediates
+        target_raw = git("cat-file", "-p", obj)
+        if target_raw is None:
+            return None
+        resolved = _resolve_symlink_target(path, target_raw)
+        if not resolved:
+            return None
+        if path != start_path:
+            intermediates.add(path)
+        path = resolved
+    return None
+
+
+def profile_input_symlink_targets() -> "set[str] | None":
+    """Paths whose dirtiness affects a profile-input symlink chain at HEAD.
+
+    Includes intermediate symlink paths and the final regular-file target.
     None if the tree could not be listed — callers treat that as dirty/miss.
     """
     rows = _parse_ls_tree()
@@ -265,15 +304,15 @@ def profile_input_symlink_targets() -> "set[str] | None":
         return None
     by_path = {path: (mode, typ, obj) for mode, typ, obj, path in rows}
     targets: set[str] = set()
-    for mode, typ, obj, path in rows:
+    for mode, typ, _obj, path in rows:
         if typ != "blob" or mode != "120000" or not is_profile_input(path):
             continue
-        target_raw = git("cat-file", "-p", obj)
-        if target_raw is None:
+        followed = _follow_symlink_chain(path, by_path)
+        if followed is None:
             return None
-        resolved = _resolve_symlink_target(path, target_raw)
-        if resolved and resolved in by_path and by_path[resolved][1] == "blob":
-            targets.add(resolved)
+        final_path, _final_obj, intermediates = followed
+        targets.update(intermediates)
+        targets.add(final_path)
     return targets
 
 
@@ -302,10 +341,10 @@ def inputs_digest() -> "str | None":
       existing non-input files.
     - `(path, blob-sha)` for every **profile-input** blob — so manifest/docs/CI
       content changes still invalidate.
-    - For profile-input **symlinks** (mode 120000), also the resolved in-repo
-      target's blob sha — so `README.md -> docs/README.md` invalidates when the
-      target content changes, not only when the symlink blob (the target path
-      string) changes.
+    - For profile-input **symlinks** (mode 120000), the final in-repo regular
+      blob after following the full symlink chain — so
+      `README.md -> docs/link.md -> docs/README.md` invalidates when the final
+      file content changes.
     - `(path, commit-sha)` for every **gitlink** (`160000 commit` submodule
       entry) — so adding a submodule or advancing its pointer invalidates.
 
@@ -323,18 +362,13 @@ def inputs_digest() -> "str | None":
             if is_profile_input(path):
                 pairs.append(f"blob\0{path}\0{obj}")
                 if mode == "120000":
-                    target_raw = git("cat-file", "-p", obj)
-                    if target_raw is None:
+                    followed = _follow_symlink_chain(path, by_path)
+                    if followed is None:
                         return None
-                    resolved = _resolve_symlink_target(path, target_raw)
-                    if (
-                        resolved
-                        and resolved in by_path
-                        and by_path[resolved][1] == "blob"
-                    ):
-                        pairs.append(
-                            f"symlink-target\0{path}\0{resolved}\0{by_path[resolved][2]}"
-                        )
+                    final_path, final_obj, _intermediates = followed
+                    pairs.append(
+                        f"symlink-target\0{path}\0{final_path}\0{final_obj}"
+                    )
         elif typ == "commit":
             pairs.append(f"gitlink\0{path}\0{obj}")
 
