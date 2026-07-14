@@ -97,6 +97,41 @@ describe("repo-profile-cache helper", () => {
     expect(getHitProfile(res.stdout)).toEqual(VALID_PROFILE)
   })
 
+  test("put path is keyed by inputs-digest (64-hex), not HEAD", () => {
+    const dir = makeRepo()
+    const cachePath = putProfile(dir)
+    expect(cachePath).toContain("/compound-engineering/repo-profile/")
+    const digestComponent = cachePath.split("/repo-profile/")[1].split("/")[1]
+    expect(digestComponent).toMatch(/^[0-9a-f]{64}\.json$/)
+    const head = git(dir, "rev-parse", "HEAD").trim()
+    expect(digestComponent).not.toBe(`${head}.json`)
+  })
+
+  test("non-input commit at new HEAD → HIT (content-addressed reuse)", () => {
+    const dir = makeRepo()
+    putProfile(dir)
+    mkdirSync(path.join(dir, "src"))
+    writeFileSync(path.join(dir, "src", "app.js"), "console.log(1)\n")
+    git(dir, "add", "-A")
+    git(dir, "commit", "-q", "-m", "non-input change")
+    const res = run(dir, "get")
+    expect(res.stdout.startsWith("HIT\n")).toBe(true)
+    expect(getHitProfile(res.stdout)).toEqual(VALID_PROFILE)
+  })
+
+  test("input-changing commit at new HEAD → MISS (new inputs digest)", () => {
+    const dir = makeRepo()
+    putProfile(dir)
+    writeFileSync(
+      path.join(dir, "package.json"),
+      '{"name":"x","version":"2.0.0"}\n',
+    )
+    git(dir, "add", "-A")
+    git(dir, "commit", "-q", "-m", "bump package")
+    const res = run(dir, "get")
+    expect(res.stdout.startsWith("MISS\n")).toBe(true)
+  })
+
   test("dirty NON-input file (untracked source) stays HIT", () => {
     const dir = makeRepo()
     putProfile(dir)
@@ -296,6 +331,15 @@ describe("repo-profile-cache helper — review-driven invalidation cases", () =>
     expect(run(dir, "get").stdout.startsWith("MISS\n")).toBe(true)
     writeFileSync(path.join(dir, "package.json"), orig) // revert → clean again
     expect(run(dir, "get").stdout.startsWith("HIT\n")).toBe(true)
+  })
+
+  test("cached doc with mismatched inputs_digest → MISS", () => {
+    const dir = makeRepo()
+    const cachePath = putProfile(dir)
+    const doc = JSON.parse(readFileSync(cachePath, "utf8"))
+    doc.inputs_digest = "0".repeat(64)
+    writeFileSync(cachePath, JSON.stringify(doc))
+    expect(run(dir, "get").stdout.startsWith("MISS\n")).toBe(true)
   })
 
   test("cached doc with a non-object profile → MISS (get-side shape guard)", () => {

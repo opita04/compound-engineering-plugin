@@ -288,7 +288,7 @@ Prepare a concise planning context summary (a paragraph or two) to pass as input
 - If `STRATEGY.md` exists, read it and include the relevant pieces (target problem, approach, active tracks) in the summary so downstream research and planning decisions are anchored to product strategy
 - If `CONCEPTS.md` exists at repo root, read it — its definitions are the canonical names for domain entities, named processes, and status concepts. Plan with those terms rather than synonyms.
 
-**Resolve the project profile from the shared cache first.** The agnostic profile (stack, deps, conventions, structure) is identical at this commit, so reuse it instead of having `repo-research-analyst` re-derive `technology`/`architecture`/`conventions` every run. Set `SKILL_DIR` to this skill's directory and run the helper (protocol in `references/repo-profile-cache.md`):
+**Resolve the project profile from the shared cache first.** The agnostic profile (stack, deps, conventions, structure) is identical whenever committed profile inputs match, so reuse it instead of having `repo-research-analyst` re-derive `technology`/`architecture`/`conventions` every run. Set `SKILL_DIR` to this skill's directory and run the helper (protocol in `references/repo-profile-cache.md`):
 
 ```bash
 SKILL_DIR="<absolute path of the directory containing the SKILL.md you just read>";

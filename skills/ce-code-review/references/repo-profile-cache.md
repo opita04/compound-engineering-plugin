@@ -1,6 +1,6 @@
 # Shared Repo-Grounding Profile Cache
 
-Read this when a repo-grounding skill needs the question-agnostic **project profile** (stack, deps, conventions, structure). The profile is derived once and reused within a session and across sessions and skills at an unchanged commit — only the *question-specific* grounding for the current run is ever re-derived.
+Read this when a repo-grounding skill needs the question-agnostic **project profile** (stack, deps, conventions, structure). The profile is derived once and reused within a session and across sessions, skills, and commits whose **profile inputs are unchanged** — only the *question-specific* grounding for the current run is ever re-derived.
 
 This file is **byte-duplicated** into every consuming skill (the plugin has no cross-skill import mechanism). All copies must stay identical; `tests/repo-profile-cache-parity.test.ts` enforces it. The deterministic cache I/O lives in the co-located `scripts/repo-profile-cache.py`; the derivation-on-miss is done by the co-located `references/agents/repo-profiler.md` persona.
 
@@ -25,13 +25,13 @@ Never read from the cache — recompute every run:
 ## Cache location & key
 
 ```
-/tmp/compound-engineering/repo-profile/<root-sha>/<head-sha>.json
+/tmp/compound-engineering/repo-profile/<root-sha>/<inputs-digest>.json
 ```
 
 - `<root-sha>` = lexicographically-first `git rev-list --max-parents=0 HEAD` — the repo identity (stable, shared across worktrees and clones).
-- `<head-sha>` = `git rev-parse HEAD` — the working state.
+- `<inputs-digest>` = sha256 over the sorted `(path, blob-sha)` pairs for every **profile-input** file at `HEAD` (`git ls-tree -r HEAD`, filtered by the helper's `is_profile_input`). Commits that only touch non-input paths (e.g. `src/`) share the same entry.
 
-Two checkouts at the same commit share the same entry. Lookup is git metadata only; on a hit, only this one file is read.
+Two checkouts whose committed profile inputs match share the same entry, even across different `HEAD` SHAs. Lookup hashes those inputs; on a hit, only this one file is read.
 
 ## Protocol — how a skill uses it
 
@@ -56,7 +56,7 @@ In all three cases, after the agnostic profile is in hand, run **this skill's qu
 
 ## Freshness (delta-aware)
 
-A cached entry is a `HIT` only when, at the current `HEAD`, its `profile_schema_version` matches and **no profile-input path** is dirty or newly-added. Freshness is checked with `git status --porcelain --untracked-files=all`, so untracked (`??`) new inputs invalidate too. The profile-input set is a conservative **superset** of every file the schema derives from — dependency manifests + lockfiles (any depth), license, root instruction/doc files, `CONCEPTS.md`/`STRATEGY.md`, topology sources (`Dockerfile`, `.github/workflows/`, `.cursor/rules`). A dirty source file, `docs/plans/*`, or other non-input path does **not** invalidate. Completeness of this set is the cardinal-rule safety requirement: over-invalidating costs a re-derive; under-invalidating would serve a stale profile.
+A cached entry is a `HIT` only when its `inputs_digest` matches the current committed profile inputs, its `profile_schema_version` matches, and **no profile-input path** is dirty or newly-added. Freshness is checked with `git status --porcelain --untracked-files=all`, so untracked (`??`) new inputs invalidate too. The profile-input set is a conservative **superset** of every file the schema derives from — dependency manifests + lockfiles (any depth), license, root instruction/doc files, `CONCEPTS.md`/`STRATEGY.md`, topology sources (`Dockerfile`, `.github/workflows/`, `.cursor/rules`). A dirty source file, `docs/plans/*`, or other non-input path does **not** invalidate. Completeness of this set is the cardinal-rule safety requirement: over-invalidating costs a re-derive; under-invalidating would serve a stale profile.
 
 ## Degradation
 

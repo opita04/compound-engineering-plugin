@@ -23,15 +23,18 @@ stamp, and writes it atomically to the computed cache path. Prints the path
 on success, `NO-CACHE` when the repo/cache is unavailable.
 
 Cache path:
-    /tmp/compound-engineering/repo-profile/<root-sha>/<head-sha>.json
+    /tmp/compound-engineering/repo-profile/<root-sha>/<inputs-digest>.json
   root-sha = lexicographically-first `git rev-list --max-parents=0 HEAD`
              (deterministic even for multi-root histories) — the repo identity,
              shared across worktrees and clones.
-  head-sha = `git rev-parse HEAD` — the working state.
+  inputs-digest = sha256 over sorted (path, blob-sha) pairs for every
+             profile-input file at HEAD (`git ls-tree -r -z HEAD`, filtered by
+             `is_profile_input`). Commits that do not touch profile inputs
+             share the same entry.
 
 Validity (HIT) requires ALL of:
   - the cache file exists and parses as JSON,
-  - stored `head_sha` == current HEAD,
+  - stored `inputs_digest` == current inputs digest,
   - stored `profile_schema_version` == PROFILE_SCHEMA_VERSION,
   - no profile-input path is dirty or newly-added per `git status --porcelain`
     (the schema-derived superset in `is_profile_input`, which also catches
@@ -44,6 +47,7 @@ never serves a profile it cannot prove fresh.
 
 Pure stdlib. No third-party dependencies.
 """
+import hashlib
 import json
 import os
 import subprocess
@@ -195,6 +199,49 @@ def root_sha() -> "str | None":
     return sorted(out.split("\n"))[0]
 
 
+def inputs_digest() -> "str | None":
+    """Sha256 of sorted (path, blob-sha) for every profile-input blob at HEAD.
+
+    Committed state only (`git ls-tree`); working-tree dirtiness is a separate
+    HIT gate via `changed_paths`. None if git could not list the tree.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "ls-tree", "-r", "-z", "HEAD"],
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+
+    pairs: list[str] = []
+    for entry in result.stdout.split(b"\0"):
+        if not entry:
+            continue
+        try:
+            meta, path_b = entry.split(b"\t", 1)
+        except ValueError:
+            continue
+        parts = meta.split()
+        if len(parts) < 3:
+            continue
+        obj_type, blob = parts[1], parts[2]
+        if obj_type != b"blob":
+            continue
+        path = path_b.decode("utf-8", errors="surrogateescape")
+        if is_profile_input(path):
+            pairs.append(f"{path}\0{blob.decode('ascii')}")
+
+    pairs.sort()
+    h = hashlib.sha256()
+    for pair in pairs:
+        h.update(pair.encode("utf-8", errors="surrogateescape"))
+        h.update(b"\n")
+    return h.hexdigest()
+
+
 def changed_paths() -> "list[str] | None":
     """Paths from `git status --porcelain`, or None if it could not run.
 
@@ -247,17 +294,18 @@ def changed_paths() -> "list[str] | None":
     return paths
 
 
-def cache_path(root: str, head: str) -> str:
-    return os.path.join(CACHE_ROOT, root, f"{head}.json")
+def cache_path(root: str, digest: str) -> str:
+    return os.path.join(CACHE_ROOT, root, f"{digest}.json")
 
 
-def resolve_keys() -> "tuple[str, str] | None":
-    """The (root-sha, head-sha) cache key, or None if not a usable git repo."""
+def resolve_keys() -> "tuple[str, str, str] | None":
+    """The (root-sha, head-sha, inputs-digest) key, or None if unusable."""
     root = root_sha()
     head = git("rev-parse", "HEAD")
-    if not root or not head:
+    digest = inputs_digest()
+    if not root or not head or not digest:
         return None
-    return root, head
+    return root, head, digest
 
 
 _PROFILE_KEYS = ("stack", "dependencies", "topology", "conventions", "vocabulary")
@@ -277,8 +325,8 @@ def do_get() -> int:
     if keys is None:
         print("NO-CACHE")
         return 0
-    root, head = keys
-    path = cache_path(root, head)
+    root, _head, digest = keys
+    path = cache_path(root, digest)
 
     def miss() -> int:
         print("MISS")
@@ -304,7 +352,7 @@ def do_get() -> int:
     profile = doc.get("profile") if isinstance(doc, dict) else None
     if (
         not isinstance(doc, dict)
-        or doc.get("head_sha") != head
+        or doc.get("inputs_digest") != digest
         or doc.get("profile_schema_version") != PROFILE_SCHEMA_VERSION
         or not is_valid_profile(profile)
     ):
@@ -325,7 +373,7 @@ def do_put(profile_file: str) -> int:
     if keys is None:
         print("NO-CACHE")
         return 0
-    root, head = keys
+    root, head, digest = keys
 
     try:
         with open(profile_file) as f:
@@ -348,9 +396,9 @@ def do_put(profile_file: str) -> int:
         return 0
 
     # Do not cache a profile derived from a DIRTY tree: it reflects uncommitted
-    # edits to profile inputs, yet it would be stored under the clean HEAD key
-    # and served as a HIT after those edits are reverted (same HEAD, clean tree)
-    # — stale. Only persist a profile that matches the committed HEAD.
+    # edits to profile inputs, yet it would be stored under the clean inputs
+    # digest and served as a HIT after those edits are reverted — stale. Only
+    # persist a profile that matches the committed profile inputs.
     changed = changed_paths()
     if changed is None or any(is_profile_input(p) for p in changed):
         sys.stderr.write(
@@ -362,12 +410,13 @@ def do_put(profile_file: str) -> int:
     doc = {
         "profile_schema_version": PROFILE_SCHEMA_VERSION,
         "root_sha": root,
-        "head_sha": head,
+        "head_sha": head,  # provenance only — not part of the HIT key
+        "inputs_digest": digest,
         "built_at": datetime.now(timezone.utc).isoformat(),
         "profile": profile,
     }
 
-    path = cache_path(root, head)
+    path = cache_path(root, digest)
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         # Atomic write: temp file in the same dir + os.replace (atomic on
