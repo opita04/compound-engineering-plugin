@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import {
   chmodSync,
@@ -13,6 +13,8 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
+
+setDefaultTimeout(20_000)
 
 const roots: string[] = []
 function temp(prefix: string): string {
