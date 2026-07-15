@@ -251,6 +251,7 @@ def _chain_from_stack_view(raw, pr, target_url):
             "number": remote_pr.get("number"),
             "url": remote_pr.get("url"),
             "state": remote_pr.get("state"),
+            "isDraft": remote_pr.get("isDraft"),
         })
     return _chain_from_entries(entries, pr, "gh-stack", (raw or {}).get("trunk"),
                                (raw or {}).get("currentBranch"), target_url=target_url)

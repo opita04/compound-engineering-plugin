@@ -249,7 +249,7 @@ describe("ce-babysit-pr pr-snapshot engine", () => {
           branches: [
             { name: "parent", needsRebase: false, pr: { number: 41, url: "https://github.com/o/r/pull/41", state: "OPEN" } },
             { name: "feature", isCurrent: true, needsRebase: true, pr: { number: 42, url: "https://GITHUB.COM/O/R/pull/42/", state: "OPEN" } },
-            { name: "child", needsRebase: false, pr: { number: 43, url: "https://github.com/o/r/pull/43", state: "OPEN" } },
+            { name: "child", needsRebase: false, pr: { number: 43, url: "https://github.com/o/r/pull/43", state: "OPEN", isDraft: true } },
           ],
         },
       },
@@ -262,6 +262,8 @@ describe("ce-babysit-pr pr-snapshot engine", () => {
     expect(chain.relationship_status).toBe("dependent")
     expect(chain.target_position).toBe(2)
     expect(chain.target_needs_rebase).toBe(true)
+    expect(chain.entries[2].isDraft).toBe(true)
+    expect(chain.dependent_prs[0].isDraft).toBe(true)
   })
 
   test("a successful view of another local stack falls back to GraphQL instead of misclassifying the target", () => {

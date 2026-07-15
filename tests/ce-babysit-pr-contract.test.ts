@@ -290,6 +290,17 @@ describe("ce-babysit-pr cross-skill contract parity", () => {
     }
   })
 
+  test("pipeline success requires clean chain currency in both loaded contracts", async () => {
+    const [babysit, watchLoop] = await Promise.all([
+      readRepoFile(BABYSIT),
+      readRepoFile("skills/ce-babysit-pr/references/watch-loop.md"),
+    ])
+
+    for (const text of [babysit, watchLoop]) {
+      expect(text).toMatch(/success only when[^.]{0,260}`all_checks_ok`[^.]{0,260}`stack_blocker`[^.]{0,80}(null|clear)/i)
+    }
+  })
+
   test("bounded-class sweep contract: babysit routes it, ce-resolve classifies/enumerates/bounds it", async () => {
     // A correct finding recurring across sibling sites must be swept as one class, not dripped
     // one-per-head. The split is protocol: babysit only recognizes + routes ("request a
