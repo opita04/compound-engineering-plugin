@@ -76,6 +76,17 @@ State lives at `/tmp/compound-engineering/ce-babysit-pr/<host>-<owner>-<repo>-<p
   "review_decision": "APPROVED",
   "mergeable": "MERGEABLE",
   "merge_state_status": "CLEAN",
+  "pr_chain": {
+    "manager_status": "confirmed|absent|probe-error",
+    "manager_source": "gh-stack|graphql|null",
+    "relationship_status": "dependent|independent|probe-error",
+    "target_position": 2,
+    "target_needs_rebase": false,
+    "upstack_needs_rebase": [],
+    "entries": [],
+    "parent_prs": [],
+    "dependent_prs": []
+  },
   "last_change_at": "<iso8601>",
   "last_action": "<short string>",
   "trajectory": {
@@ -89,7 +100,7 @@ State lives at `/tmp/compound-engineering/ce-babysit-pr/<host>-<owner>-<repo>-<p
 }
 ```
 
-A `check_key` is `"<workflow>/<name>"` (or `"<name>"` when there is no workflow) — stable across polls for the same head, which is all the dedup needs (see below). Each `snapshot` emits `changed_this_tick`, `quiet_seconds`, `session_seconds`, and the derived `trajectory` facts (see **Non-convergence** above). The `trajectory` sub-state is deterministic bookkeeping the script maintains; the leaves reason over the emitted facts.
+A `check_key` is `"<workflow>/<name>"` (or `"<name>"` when there is no workflow) — stable across polls for the same head, which is all the dedup needs (see below). Each `snapshot` emits `changed_this_tick`, `quiet_seconds`, `session_seconds`, `pr_chain`, `stack_blocker`, and the derived `trajectory` facts (see **Non-convergence** above). The chain probe is CLI-first: accept `gh stack view --json` only when it contains the target PR, then use the GraphQL fallback; a failed fallback stays `probe-error`, never `absent`. Ordinary open-PR base/head relationships classify manual dependencies only when no manager is confirmed. The `trajectory` sub-state is deterministic bookkeeping the script maintains; the leaves reason over the emitted facts.
 
 ## Claim → act → confirm (the dedup protocol)
 
@@ -103,7 +114,7 @@ The rule that makes ticks idempotent *and* crash-safe: **the snapshot never mark
 
 ## Merge-readiness and the settle window
 
-Do not re-derive "required checks" — GitHub already computes it. Use `mergeable == "MERGEABLE"` and `merge_state_status == "CLEAN"` (branch protection satisfied: required checks green, required review approved, no conflicts). `UNSTABLE` means mergeable but a non-required check is red; `BLOCKED` means a required gate is unmet. The snapshot also emits `has_failing_checks` so you can act on a red check even while `merge_state_status` is `UNSTABLE`.
+Do not re-derive "required checks" — GitHub already computes it. Use `mergeable == "MERGEABLE"` and `merge_state_status == "CLEAN"` for GitHub gates, then apply chain currency separately. A managed target is ready only when `target_needs_rebase == false`; true or unknown emits `stack_blocker`. A manual dependency can be ready relative to its parent but is not independently landable while that parent remains open. `UNSTABLE` means mergeable but a non-required check is red; `BLOCKED` means a required gate is unmet. The snapshot also emits `has_failing_checks` so you can act on a red check even while `merge_state_status` is `UNSTABLE`.
 
 The settle window guards the most damaging false positive: "CI went green, told the user to merge, then feedback landed."
 
@@ -118,8 +129,10 @@ The settle window guards the most damaging false positive: "CI went green, told 
 
 ## Edge cases
 
-- **Behind base** (`merge_state_status == "BEHIND"`): when the repo requires up-to-date branches (or the base moved materially), `gh pr update-branch` — a **merge of base into head**, never a rebase. It re-triggers CI + review, so at most once per tick and only when it unblocks merge.
-- **Merge conflict mid-flight** (`mergeable == "CONFLICTING"`): merge base into head locally and split like the fix-authority boundary — **mechanical** conflicts (lockfiles, changelog/generated files, non-overlapping additions) resolve + commit + push; a **semantic** conflict (both sides changed the same logic, so resolving decides intended behavior) aborts the merge and surfaces as `needs-human` with `decision_context`. **Never rebase or force-push** — rewriting a PR head branch is destructive; a base-into-head merge is the only safe mechanism.
+- **Managed stack:** `target_needs_rebase` true/unknown becomes `stack-blocked`; do not use `gh pr update-branch` or a local base merge. After a target push, surface `upstack_needs_rebase` as an upstack residual. Stack rewriting remains outside babysit's authority.
+- **Manual dependency chain:** keep the requested PR as the target, qualify readiness relative to its parent, and report downstream impact. Ordinary target-local base merges remain allowed; dependent heads remain out of scope.
+- **Independent PR behind/conflicting:** use `gh pr update-branch` when needed, or resolve only mechanical conflicts via a base merge. Semantic conflicts become `needs-human`. Never rebase or force-push.
+- **Manager/relationship probe error:** continue review and CI streams, but perform no branch-currency mutation and do not declare ready until classification succeeds.
 - **External head change / force-push:** the head SHA moved under the loop. The snapshot clears SHA-scoped CI state automatically; just re-snapshot. Never clobber unrelated pushed work.
 - **PR closed or merged externally:** detected as `pr_state != "OPEN"` on any tick → clean exit with a final status.
 - **needs-human feedback:** `ce-resolve-pr-feedback` leaves those threads open and returns them as escalations; record each with `mark ... --disposition needs-human`, keep doing independent CI work, and surface them. Never auto-decline or auto-resolve a thread you did not fix. A parked `needs-human` is a **standing residual** (SKILL.md Step 3): it blocks *declaring* merge-ready but does **not** end the watch — keep handling new CI and later review rounds around it. Only a true stop (terminal / looks-ready / the budget cap) ends the loop, not a count of accumulated escalations.
