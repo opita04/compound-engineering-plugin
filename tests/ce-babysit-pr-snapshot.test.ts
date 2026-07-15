@@ -244,7 +244,7 @@ describe("ce-babysit-pr pr-snapshot engine", () => {
           currentBranch: "feature",
           branches: [
             { name: "parent", needsRebase: false, pr: { number: 41, url: "https://github.com/o/r/pull/41", state: "OPEN" } },
-            { name: "feature", isCurrent: true, needsRebase: true, pr: { number: 42, url: "https://github.com/o/r/pull/42", state: "OPEN" } },
+            { name: "feature", isCurrent: true, needsRebase: true, pr: { number: 42, url: "https://GITHUB.COM/O/R/pull/42/", state: "OPEN" } },
             { name: "child", needsRebase: false, pr: { number: 43, url: "https://github.com/o/r/pull/43", state: "OPEN" } },
           ],
         },
@@ -290,12 +290,56 @@ describe("ce-babysit-pr pr-snapshot engine", () => {
     expect(chain.target_needs_rebase).toBeNull()
   })
 
+  test("a local stack entry with the target number in another repository falls back to GraphQL", () => {
+    const { chain, calls } = probeChain({
+      stackView: {
+        status: 0,
+        stdout: {
+          trunk: "main",
+          currentBranch: "feature",
+          branches: [
+            {
+              name: "feature",
+              isCurrent: true,
+              needsRebase: true,
+              pr: { number: 42, url: "https://github.com/another/repository/pull/42", state: "OPEN" },
+            },
+          ],
+        },
+      },
+      graphql: {
+        status: 0,
+        stdout: {
+          data: { repository: {
+            defaultBranchRef: { name: "main" },
+            pullRequest: {
+              stackEntry: { position: 1 },
+              stack: {
+                id: "STACK_2", number: 100, size: 1, baseRefName: "main",
+                entries: { nodes: [
+                  { position: 1, pullRequest: { number: 42, url: "https://github.com/o/r/pull/42", state: "OPEN", headRefName: "feature" } },
+                ] },
+              },
+            },
+          } },
+        },
+      },
+    })
+    expect(calls.some((call) => call.includes("api graphql"))).toBe(true)
+    expect(chain.manager_status).toBe("confirmed")
+    expect(chain.manager_source).toBe("graphql")
+    expect(chain.target_needs_rebase).toBeNull()
+  })
+
   test("successful null GraphQL stack classifies an ordinary manual dependency chain", () => {
     const { chain, calls } = probeChain({
       baseRef: "parent",
       headRef: "feature",
       stackView: { status: 1, stderr: "no current stack" },
-      graphql: { status: 0, stdout: { data: { repository: { pullRequest: { stackEntry: null, stack: null } } } } },
+      graphql: { status: 0, stdout: { data: { repository: {
+        defaultBranchRef: { name: "main" },
+        pullRequest: { stackEntry: null, stack: null },
+      } } } },
       openPrs: [
         { number: 41, url: "https://github.com/o/r/pull/41", state: "MERGED", baseRefName: "main", headRefName: "parent" },
         { number: 42, url: "https://github.com/o/r/pull/42", state: "OPEN", baseRefName: "parent", headRefName: "feature" },
@@ -308,6 +352,28 @@ describe("ce-babysit-pr pr-snapshot engine", () => {
     expect(chain.relationship_status).toBe("dependent")
     expect(chain.parent_prs.map((pr: any) => pr.number)).toEqual([41])
     expect(chain.dependent_prs.map((pr: any) => pr.number)).toEqual([43])
+  })
+
+  test("a PR based on the default branch ignores unrelated PRs whose head has the default-branch name", () => {
+    const { chain, calls } = probeChain({
+      baseRef: "main",
+      headRef: "feature",
+      stackView: { status: 1, stderr: "no current stack" },
+      graphql: { status: 0, stdout: { data: { repository: {
+        defaultBranchRef: { name: "main" },
+        pullRequest: { stackEntry: null, stack: null },
+      } } } },
+      openPrs: [
+        { number: 500, url: "https://github.com/o/r/pull/500", state: "OPEN", baseRefName: "main", headRefName: "main" },
+        { number: 320, url: "https://github.com/o/r/pull/320", state: "OPEN", baseRefName: "main", headRefName: "main" },
+      ],
+    })
+    expect(calls.some((call) => call.includes("gh pr list") && call.includes("--head main"))).toBe(false)
+    expect(calls.some((call) => call.includes("gh pr list") && call.includes("--base feature"))).toBe(true)
+    expect(chain.manager_status).toBe("absent")
+    expect(chain.relationship_status).toBe("independent")
+    expect(chain.parent_prs).toEqual([])
+    expect(chain.dependent_prs).toEqual([])
   })
 
   test("manager probe failure remains unknown and never collapses to absent", () => {
