@@ -25,6 +25,14 @@ describe("ce-pov subject-shape contract", () => {
     expect(skill).toContain('scripts/repo-profile-cache.py" get')
   })
 
+  test("the always-loaded Phase 0 frame names the document and approach intents", async () => {
+    const skill = await skillFile("SKILL.md")
+    const phaseZero = between(skill, "### Phase 0: Frame and Classify", "### Phase 1: Ground")
+
+    expect(phaseZero).toContain("Document-take")
+    expect(phaseZero).toContain("Approach-set")
+  })
+
   test("intake and boundaries distinguish takes, findings reviews, and supplied approaches", async () => {
     const [intake, boundaries] = await Promise.all([
       skillFile("references/intake.md"),

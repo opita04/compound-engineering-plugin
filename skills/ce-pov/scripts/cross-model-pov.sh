@@ -531,9 +531,14 @@ run_provider() {   # <provider>
   # (codex/cursor-agent) can neither list a shared cwd nor read another peer's
   # published pov-<provider>.json -- it has no path handle to RUN_DIR at all.
   # OUT is published to RUN_DIR only after the peer process exits (normalize below),
-  # never written into RUN_DIR by the peer itself. Falls back to RUN_DIR only if
-  # mktemp fails (preserves prior behavior over failing the pass).
-  PEER_WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/xmodel-pov-peer-XXXXXX")" || PEER_WORKDIR="$RUN_DIR"
+  # never written into RUN_DIR by the peer itself. Isolation is mandatory: if the
+  # empty workspace cannot be created, fail this provider closed and let candidate
+  # degradation continue rather than exposing the shared fold-in directory.
+  if ! PEER_WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/xmodel-pov-peer-XXXXXX")"; then
+    log "provider $provider workspace isolation unavailable; skipping provider"
+    rm -f "$OUT"
+    return 0
+  fi
   RAW_OUT="$PEER_WORKDIR/pov-$provider.raw.json"
   case "$provider" in
     codex)    primary="codex" ;;

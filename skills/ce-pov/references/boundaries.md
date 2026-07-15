@@ -4,7 +4,7 @@ Load this when the input's fit for `ce-pov` is in doubt, or to route a Hold (SKI
 
 ## The discriminator
 
-`ce-pov` always takes an **external input** and judges it **against this project**, producing a **decisive position** — not options, not requirements, not implementation, not a diagnosis. If the answer should be a *verdict about your project*, it is `ce-pov`. If the answer is options, requirements, implementation, a diagnosis, or a neutral explainer, route out.
+`ce-pov` takes a **supplied subject** and judges it **against this project**, producing a **decisive position** — not options, not requirements, not implementation, not a diagnosis. If the answer should be a *verdict about your project*, it is `ce-pov`. If the answer is options, requirements, implementation, a diagnosis, or a neutral explainer, route out.
 
 ## Where the lines fall
 

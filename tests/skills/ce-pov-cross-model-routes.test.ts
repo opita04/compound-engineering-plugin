@@ -185,6 +185,25 @@ describe("ce-pov output gate and receipts", () => {
     expect(result.stderr).toContain("peer skip evidence")
     expect(result.stderr).toContain("quota exhausted")
   })
+
+  test("workspace creation failure skips the provider without publishing an artifact", () => {
+    const { bin, env } = sandbox(["claude"])
+    const invoked = path.join(temp("pov-invoked-"), "claude")
+    const realMktemp = realTools().find(([tool]) => tool === "mktemp")?.[1]
+    expect(realMktemp).toBeTruthy()
+    writeFileSync(path.join(bin, "claude"), `#!/bin/sh\n: > '${invoked}'\nexit 0\n`)
+    rmSync(path.join(bin, "mktemp"))
+    writeFileSync(path.join(bin, "mktemp"), `#!/bin/sh\nif [ "\${1:-}" = "-d" ]; then exit 1; fi\nexec '${realMktemp}' "$@"\n`)
+    chmodSync(path.join(bin, "claude"), 0o755)
+    chmodSync(path.join(bin, "mktemp"), 0o755)
+
+    const dir = runDir()
+    const result = run(["codex", "claude", payload(), dir], dir, env)
+    expect(result.code).toBe(0)
+    expect(existsSync(invoked)).toBe(false)
+    expect(result.files).not.toContain("pov-claude.json")
+    expect(result.stderr).toContain("workspace isolation unavailable")
+  })
 })
 
 describe("ce-pov egress fallback", () => {
@@ -200,5 +219,23 @@ describe("ce-pov egress fallback", () => {
     const out = JSON.parse(readFileSync(path.join(dir, "pov-grok.json"), "utf8"))
     expect(out.cross_model_route).toBe("grok-cursor")
     expect(out.external_check).toBe("unavailable")
+  })
+
+  test("grok-only egress allowlist forbids Cursor fallback", () => {
+    const { bin, env } = sandbox(["grok", "cursor-agent"])
+    const cursorInvoked = path.join(temp("pov-invoked-"), "cursor")
+    writeFileSync(path.join(bin, "grok"), "#!/bin/sh\nexit 1\n")
+    writeFileSync(path.join(bin, "cursor-agent"), `#!/bin/sh\n: > '${cursorInvoked}'\nexit 0\n`)
+    chmodSync(path.join(bin, "grok"), 0o755)
+    chmodSync(path.join(bin, "cursor-agent"), 0o755)
+
+    const dir = runDir()
+    const result = run(["codex", "grok", payload(), dir], dir, {
+      ...env,
+      CROSS_MODEL_PEERS: "grok",
+    })
+    expect(result.code).toBe(0)
+    expect(existsSync(cursorInvoked)).toBe(false)
+    expect(result.files).not.toContain("pov-grok.json")
   })
 })
