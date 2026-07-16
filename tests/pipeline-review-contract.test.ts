@@ -271,6 +271,60 @@ describe("verification_evidence seam parity (ce-work <-> lfg)", () => {
   })
 })
 
+describe("cross-model execution receipt seam parity (ce-work <-> lfg)", () => {
+  const ROUTE_RECEIPT_FIELDS = [
+    "implementation_engine_binding",
+    "requested_route",
+    "actual_route",
+    "requested_model",
+    "actual_model",
+    "fallback_reason",
+    "run_id",
+    "unit_receipts",
+    "plan_checkpoint",
+    "blockers",
+    "recovery_path",
+  ]
+
+  function sliceSection(content: string, startAnchor: string, endAnchor: string): string {
+    const start = content.indexOf(startAnchor)
+    expect(start, `start anchor not found: ${startAnchor}`).toBeGreaterThanOrEqual(0)
+    const end = content.indexOf(endAnchor, start + startAnchor.length)
+    expect(end, `end anchor not found: ${endAnchor}`).toBeGreaterThan(start)
+    return content.slice(start, end)
+  }
+
+  test("lfg requires every route receipt exposed by ce-work", async () => {
+    const ceWork = await readRepoFile("skills/ce-work/SKILL.md")
+    const lfg = await readRepoFile("skills/lfg/SKILL.md")
+    const returned = sliceSection(ceWork, "## Return-to-Caller Mode", "Engine selection (")
+    const gate = sliceSection(
+      lfg,
+      "2. Invoke the `ce-work` skill with `mode:return-to-caller",
+      "3. Invoke the `ce-simplify-code`",
+    )
+
+    for (const field of ROUTE_RECEIPT_FIELDS) {
+      expect(returned, `ce-work must return ${field}`).toContain(`\`${field}\``)
+      expect(gate, `lfg must gate on ${field}`).toContain(`\`${field}\``)
+    }
+  })
+
+  test("lfg keeps the binding out of plan and review inputs", async () => {
+    const lfg = await readRepoFile("skills/lfg/SKILL.md")
+    const carrier = sliceSection(
+      lfg,
+      "## Implementation-only routing carrier",
+      "1. Invoke the `ce-plan` skill",
+    )
+    expect(carrier).toContain("remove the implementation-routing directive")
+    expect(carrier).toContain("Never pass")
+    expect(carrier).toContain("`ce-plan`")
+    expect(carrier).toContain("`ce-code-review`")
+    expect(carrier).toContain("feature content")
+  })
+})
+
 describe("ce-debug regression test selection", () => {
   test("inspects and updates existing tests instead of always adding new tests", async () => {
     const content = await readRepoFile("skills/ce-debug/SKILL.md")

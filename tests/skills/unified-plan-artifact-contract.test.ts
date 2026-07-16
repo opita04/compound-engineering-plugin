@@ -186,6 +186,66 @@ describe("unified plan artifact contract", () => {
     expect(lfg).not.toContain("artifact_readiness: approach-plan")
   })
 
+  test("lfg carries implementation routing only at the ce-work seam", () => {
+    const carrier = sliceSection(
+      lfg,
+      "## Implementation-only routing carrier",
+      "1. Invoke the `ce-plan` skill",
+    )
+    expect(carrier).toContain("semantic intent")
+    expect(carrier).toContain("not keyword or prompt-token matching")
+    expect(carrier).toContain("plain mention")
+    expect(carrier).toContain('"use Codex for implementation"')
+    expect(carrier).toContain('"only use Composer for implementation"')
+    expect(carrier).toContain("implementation_engine")
+    for (const field of ["mode", "target", "model", "source"]) {
+      expect(carrier).toContain(`\`${field}\``)
+    }
+    expect(carrier).toContain("exactly these four fields")
+    expect(carrier).toContain("Never pass")
+    expect(carrier).toContain("`ce-plan`")
+    expect(carrier).toContain("planning or review")
+
+    const step2 = sliceSection(
+      lfg,
+      "2. Invoke the `ce-work` skill",
+      "3. Invoke the `ce-simplify-code` skill",
+    )
+    expect(step2).toContain("beside `mode:return-to-caller`")
+    expect(step2).toContain("standing per-checkout configuration")
+    expect(carrier).toContain("Do not construct a carrier from standing configuration")
+    expect(step2).toContain("same `run_id`")
+  })
+
+  test("lfg's route-aware return gate preserves its shipping tail", () => {
+    const step2 = sliceSection(
+      lfg,
+      "2. Invoke the `ce-work` skill",
+      "3. Invoke the `ce-simplify-code` skill",
+    )
+    for (const field of [
+      "implementation_engine_binding",
+      "requested_route",
+      "actual_route",
+      "requested_model",
+      "actual_model",
+      "fallback_reason",
+      "run_id",
+      "unit_receipts",
+      "plan_checkpoint",
+      "blockers",
+      "recovery_path",
+    ]) {
+      expect(step2).toContain(`\`${field}\``)
+    }
+    expect(step2).toContain("`prefer`")
+    expect(step2).toContain("continue to step 3 exactly once")
+    expect(step2).toContain("prominently disclosing its requested-versus-actual route/model")
+    expect(step2).toContain("`require`")
+    expect(step2).toContain("must not prompt")
+    expect(step2).toContain("stop the pipeline")
+  })
+
   test("review and publishing skills understand unified artifacts", () => {
     expect(docReview).toContain("unified-requirements")
     expect(docReview).toContain("unified-plan")
