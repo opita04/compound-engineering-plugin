@@ -1,0 +1,134 @@
+name: Candidate Validation
+run-name: Validate CE candidate ${{ inputs.candidate_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact candidate commit in the disabled-Actions staging repository
+        required: true
+        type: string
+      base_sha:
+        description: Exact trusted fork-main commit used to build the candidate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ce-candidate-${{ inputs.candidate_sha }}
+  cancel-in-progress: false
+
+env:
+  BUN_IMAGE: oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Validate immutable inputs
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          BASE_SHA: ${{ inputs.base_sha }}
+        run: |
+          set -euo pipefail
+          for value in "$CANDIDATE_SHA" "$BASE_SHA"; do
+            if [[ ! "$value" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "candidate_sha and base_sha must be full lowercase commit SHAs" >&2
+              exit 2
+            fi
+          done
+          test "${GITHUB_REF}" = "refs/heads/main"
+          test "${GITHUB_SHA}" = "$BASE_SHA"
+
+      - name: Check out trusted policy revision
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ inputs.base_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: trusted
+
+      - name: Check out candidate transport
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: opita04/compound-engineering-candidates
+          ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: candidate
+
+      - name: Enforce provenance and privileged-surface policy
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          BASE_SHA: ${{ inputs.base_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C trusted rev-parse HEAD)" = "$BASE_SHA"
+          test "$(git -C candidate rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git -C candidate merge-base --is-ancestor "$BASE_SHA" "$CANDIDATE_SHA"
+          privileged="$(git -C candidate diff --name-only "$BASE_SHA..$CANDIDATE_SHA" -- .github)"
+          if [[ -n "$privileged" ]]; then
+            echo "candidate changes privileged GitHub automation:" >&2
+            printf '%s\n' "$privileged" >&2
+            exit 1
+          fi
+
+      - name: Pull immutable validation runtime
+        run: docker pull "$BUN_IMAGE"
+
+      - name: Install locked dependencies without lifecycle scripts
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --cap-drop=ALL \
+            --security-opt=no-new-privileges \
+            --memory=4g --cpus=2 --pids-limit=512 \
+            --env CI=1 --env HOME=/tmp/home --env NO_COLOR=1 \
+            --tmpfs /tmp:rw,nosuid,size=1g \
+            --volume "$PWD/candidate:/workspace:rw" \
+            --workdir /workspace \
+            "$BUN_IMAGE" \
+            bun install --frozen-lockfile --ignore-scripts
+
+      - name: Execute candidate in networkless container
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ce-output"
+          docker run --rm \
+            --network=none \
+            --cap-drop=ALL \
+            --security-opt=no-new-privileges \
+            --memory=4g --cpus=2 --pids-limit=512 \
+            --env CI=1 --env HOME=/tmp/home --env NO_COLOR=1 \
+            --tmpfs /tmp:rw,nosuid,size=1g \
+            --volume "$PWD/candidate:/workspace:rw" \
+            --volume "$RUNNER_TEMP/ce-output:/output:rw" \
+            --workdir /workspace \
+            "$BUN_IMAGE" \
+            /bin/bash -ceu '
+              bun run release:validate
+              bun test \
+                tests/compound-support-files.test.ts \
+                tests/skills/unified-plan-artifact-contract.test.ts \
+                tests/review-skill-contract.test.ts
+              set +e
+              bun test --reporter=junit --reporter-outfile=/output/full-suite.xml 2>&1 | tee /output/full-suite.log
+              status=${PIPESTATUS[0]}
+              set -e
+              printf "%s\n" "$status" > /output/full-suite.exit
+            '
+
+      - name: Enforce trusted structural result policy
+        run: >-
+          /usr/bin/python3 -I -S
+          trusted/.github/validation/validate_candidate_results.py
+          "$RUNNER_TEMP/ce-output"
+
+      - name: Confirm candidate and trusted policy were not mutated
+        run: |
+          set -euo pipefail
+          test -z "$(git -C trusted status --porcelain=v1 --untracked-files=all)"
+          test -z "$(git -C candidate status --porcelain=v1 --untracked-files=no)"
