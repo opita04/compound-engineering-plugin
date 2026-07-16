@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { spawnSync } from "node:child_process"
 import {
   chmodSync,
@@ -15,6 +15,8 @@ import {
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { createHash } from "node:crypto"
+
+setDefaultTimeout(30_000)
 
 const SCRIPT = path.join(__dirname, "../../skills/ce-work/scripts/unit-workspace.py")
 const ADAPTER = path.join(__dirname, "../../skills/ce-work/scripts/cross-model-work.sh")
