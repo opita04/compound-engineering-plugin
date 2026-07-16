@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   statSync,
@@ -195,6 +196,10 @@ describe("ce-work unit workspace controller", () => {
     expect(init(runs, "run-tree", f).word).toBe("READY")
     expect(ctl(runs, "prepare", "--run-id", "run-tree", "--unit-id", "U2", "--base", f.base, "--packet-digest", "packet").word).toBe("PREPARED")
     const workspace = path.join(runs, "run-tree", "units", "U2", "workspace")
+    const linkedReal = realpathSync(linked)
+    const workspaceReal = realpathSync(workspace)
+    expect(workspaceReal.startsWith(`${linkedReal}${path.sep}`)).toBe(false)
+    expect(worktreePaths(linked).map(realpathSync)).toContain(workspaceReal)
     expect(git(workspace, "rev-parse", "--git-common-dir")).toBe(git(linked, "rev-parse", "--git-common-dir"))
     expect(sh(workspace, ["git", "symbolic-ref", "-q", "HEAD"], false).status).not.toBe(0)
 

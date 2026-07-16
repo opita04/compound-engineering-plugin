@@ -254,6 +254,8 @@ describe("ce-work cross-model engine contract", () => {
     expect(protocol).toContain("expected post-apply tree and changed-path set")
     expect(protocol).toContain("unknown dirt blocks without destructive restoration")
     expect(protocol).toContain("status`, `reap`, and `cleanup")
+    expect(protocol).toContain("block selection")
+    expect(protocol).toContain("Do not dispatch a new third run")
   })
 
   test("separates scheduling from engine/workspace selection and declines unsafe waves", async () => {
@@ -282,6 +284,19 @@ describe("ce-work cross-model engine contract", () => {
     expect(loop).toContain("disable further parallel waves")
   })
 
+  test("makes linked-checkout siblings and silent-route supervision explicit", async () => {
+    const protocol = await readRepoFile("skills/ce-work/references/cross-model-execution.md")
+
+    expect(protocol).toContain("already a linked worktree does not disable this route")
+    expect(protocol).toContain("detached **sibling**")
+    expect(protocol).toContain("/tmp/compound-engineering/ce-work/<run-id>/")
+    expect(protocol).toContain("never a nested worktree")
+    expect(protocol).toContain("plan-only state is checkpointable, not a route blocker")
+    expect(protocol).toContain("`hard-only` is the normal posture")
+    expect(protocol).toContain("disable idle timeout")
+    expect(protocol).toContain("never infer failure or fallback merely from absent incremental activity")
+  })
+
   test("defines same-base parallel authoring with serial semantic fold-in", async () => {
     const protocol = await readRepoFile("skills/ce-work/references/cross-model-execution.md")
     const wave = sliceSection(protocol, "## Parallel external-wave protocol", "## Resume and fallback exactly once")
@@ -300,6 +315,36 @@ describe("ce-work cross-model engine contract", () => {
     expect(wave).toContain("re-dispatch")
     expect(wave).toContain("serial fallback")
     expect(wave).toContain("never blind-merge")
+  })
+
+  test("ships an evaluator-owned fresh-context fixture pack for the weakest seams", async () => {
+    const evalPack = await readRepoFile("skills/ce-work/references/cross-model-work-eval.md")
+
+    expect(evalPack).toMatch(/must not be injected into\s+the agent under test/)
+    expect(evalPack).toContain("weakest practical installed model tier")
+    expect(evalPack).toContain("strong installed model tier")
+    expect(evalPack).toContain("Change")
+    expect(evalPack).toContain("Verify")
+    expect(evalPack).toContain("Consider")
+    for (let fixture = 1; fixture <= 20; fixture += 1) {
+      expect(evalPack).toContain(`E${fixture} `)
+    }
+    for (const seam of [
+      "native restraint",
+      "LFG carrier",
+      "selected-plan dirt",
+      "lost contact",
+      "ambiguous recovery",
+      "authority narrowing",
+      "hidden interface collision",
+      "silent route",
+      "unsupported restriction",
+      "transactional failure",
+      "return boundary",
+      "linked-checkout sibling",
+    ]) {
+      expect(evalPack).toContain(seam)
+    }
   })
 })
 
