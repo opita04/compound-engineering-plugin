@@ -76,6 +76,9 @@ jobs:
             exit 1
           fi
 
+      - name: Prepare unprivileged candidate workspace
+        run: sudo chown -R --no-dereference 1000:1000 candidate
+
       - name: Pull immutable validation runtime
         run: docker pull "$BUN_IMAGE"
 
@@ -97,6 +100,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/ce-output"
+          sudo chown 1000:1000 "$RUNNER_TEMP/ce-output"
           docker run --rm \
             --network=none \
             --cap-drop=ALL \
