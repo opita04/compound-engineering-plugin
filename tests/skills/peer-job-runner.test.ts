@@ -240,6 +240,24 @@ describe("peer-job-runner lifecycle", () => {
     expect(pidAlive(pids!.worker_pid)).toBe(false)
   }, 25000)
 
+  test("idle 0 disables only idle supervision; hard cap remains authoritative", () => {
+    const root = makeRoot()
+    const env = { ...FAST, CE_PEER_IDLE_SECS: "0", CE_PEER_HARD_SECS: "2" }
+    const stub = writeStub(`echo once\nsleep 60\nexit 0\n`)
+    const { id, dir } = startJob(root, env, [stub], { extra: ["--no-sweep"] })
+    trackJob(dir)
+    const meta = JSON.parse(readFileSync(path.join(dir, "meta.json"), "utf8"))
+    expect(meta.supervision.idle).toBeNull()
+    expect(meta.supervision.hard).toBe(2)
+    expect(meta.sweep_enabled).toBe(false)
+
+    const w = waitState(root, env, id, 15)
+    expect(w.stdout.trim()).toBe("timeout")
+    const reason = readFileSync(path.join(dir, "reason"), "utf8")
+    expect(reason).toContain("hard cap")
+    expect(reason).not.toContain("idle window")
+  }, 20000)
+
   test("hard cap and margin race: supervisor reaps, and its record wins over a racing clean exit", () => {
     const root = makeRoot()
     const env = { ...FAST, CE_PEER_HARD_SECS: "2", CE_PEER_IDLE_SECS: "30" }
@@ -364,6 +382,30 @@ describe("peer-job-runner lifecycle", () => {
     const st = runner(root, FAST, ["status", id])
     expect(st.code).not.toBe(0)
     expect(st.stderr).not.toContain("Traceback")
+  }, 15000)
+
+  test("--no-sweep preserves old durable run roots while default start still sweeps", () => {
+    const root = makeRoot()
+    const skillDir = path.join(root, "ce-doc-review")
+    const durable = path.join(skillDir, "durable-old")
+    mkdirSync(path.join(durable, "jobs"), { recursive: true })
+    writeFileSync(path.join(durable, "transport-ref-evidence"), "retain")
+    const past = new Date(Date.now() - 25 * 3600 * 1000)
+    utimesSync(durable, past, past)
+
+    const stub = writeStub(`exit 0\n`)
+    const retained = startJob(root, FAST, [stub], {
+      runId: "ce-work-style",
+      extra: ["--no-sweep"],
+    })
+    trackJob(retained.dir)
+    expect(waitState(root, FAST, retained.id, 10).stdout.trim()).toBe("done")
+    expect(existsSync(durable)).toBe(true)
+
+    const swept = startJob(root, FAST, [stub], { runId: "review-default" })
+    trackJob(swept.dir)
+    expect(waitState(root, FAST, swept.id, 10).stdout.trim()).toBe("done")
+    expect(existsSync(durable)).toBe(false)
   }, 15000)
 
   test("reap: fast return, supervisor classifies once, second reap is a no-op", () => {

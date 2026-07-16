@@ -141,7 +141,7 @@ def jobs_root_base() -> str:
     return os.path.abspath(os.environ.get("CE_PEER_JOBS_ROOT") or DEFAULT_ROOT)
 
 
-def _env_num(name: str, default: float, conv) -> float:
+def _env_num(name: str, default: float, conv, *, allow_zero: bool = False):
     raw = os.environ.get(name)
     if not raw:
         return default
@@ -149,12 +149,14 @@ def _env_num(name: str, default: float, conv) -> float:
         val = conv(raw)
     except ValueError:
         return default
+    if allow_zero and val == 0:
+        return None
     return val if val > 0 else default
 
 
 def cfg() -> dict:
     return {
-        "idle": _env_num("CE_PEER_IDLE_SECS", 240.0, float),
+        "idle": _env_num("CE_PEER_IDLE_SECS", 240.0, float, allow_zero=True),
         "hard": _env_num("CE_PEER_HARD_SECS", 630.0, float),
         "log_max": int(_env_num("CE_PEER_LOG_MAX_BYTES", 10 * 1024 * 1024, int)),
         "result_max": int(_env_num("CE_PEER_RESULT_MAX_BYTES", 5 * 1024 * 1024, int)),
@@ -571,7 +573,7 @@ def supervise(job_dir: str, argv, result_path, conf: dict, ack_fd: int) -> None:
                 f"out.log exceeded byte cap ({size} > {conf['log_max']} bytes)"
             )
             break
-        if now - last_growth >= conf["idle"]:
+        if conf["idle"] is not None and now - last_growth >= conf["idle"]:
             _reap_worker(proc, conf)
             state, reason = "timeout", f"no output for {conf['idle']:g}s (idle window)"
             break
@@ -676,7 +678,8 @@ def cmd_start(args, worker_argv) -> int:
     run_dir = os.path.join(skill_dir, args.run_id)
     jobs_root = os.path.join(run_dir, "jobs")
     ensure_owned_dirs(base, jobs_root)
-    sweep_stale_runs(skill_dir, keep=run_dir)
+    if not args.no_sweep:
+        sweep_stale_runs(skill_dir, keep=run_dir)
 
     job_id, job_dir = claim_job_dir(jobs_root)
     result_path = os.path.abspath(args.result_path) if args.result_path else None
@@ -696,6 +699,7 @@ def cmd_start(args, worker_argv) -> int:
             resolved = argv0
     argv = [resolved] + list(worker_argv[1:])
 
+    conf = cfg()
     meta = {
         "job_id": job_id,
         "skill": args.skill,
@@ -705,6 +709,8 @@ def cmd_start(args, worker_argv) -> int:
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "worker_argv": argv,
         "result_path": result_path,
+        "sweep_enabled": not args.no_sweep,
+        "supervision": conf,
     }
     try:
         create_exclusive(
@@ -727,7 +733,7 @@ def cmd_start(args, worker_argv) -> int:
             "nothing was detached"
         )
 
-    if not detach_supervisor(job_dir, argv, result_path, cfg()):
+    if not detach_supervisor(job_dir, argv, result_path, conf):
         raise RunnerError(
             f"detach failed for job {job_id}: supervisor did not acknowledge; "
             f"inspect {job_dir}"
@@ -948,6 +954,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_start.add_argument(
         "--result-path", default=None, dest="result_path",
         help="worker's expected result file; done then requires it non-empty",
+    )
+    p_start.add_argument(
+        "--no-sweep", action="store_true",
+        help="retain old sibling run roots (ce-work durable recovery)",
     )
 
     p_status = sub.add_parser("status", help="print each job's state word")
