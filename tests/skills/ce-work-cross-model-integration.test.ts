@@ -102,6 +102,108 @@ afterEach(() => {
 })
 
 describe("ce-work serial cross-model transaction", () => {
+  test("scope expansion remains a successful detached result for host inspection", () => {
+    const root = temp("ce-work-scope-expansion-")
+    const repo = path.join(root, "repo")
+    const peerRoot = path.join(root, "jobs")
+    const runs = path.join(peerRoot, "ce-work")
+    mkdirSync(repo)
+    git(repo, "init", "-b", "main")
+    git(repo, "config", "user.name", "CE Work Host")
+    git(repo, "config", "user.email", "host@example.test")
+    mkdirSync(path.join(repo, "docs", "plans"), { recursive: true })
+    const plan = path.join(repo, "docs", "plans", "plan.md")
+    writeFileSync(plan, "# Plan\n")
+    writeFileSync(path.join(repo, "seed.txt"), "seed\n")
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "seed")
+    const base = git(repo, "rev-parse", "HEAD")
+    const planDigest = createHash("sha256").update(readFileSync(plan)).digest("hex")
+
+    expect(control(
+      runs,
+      "init",
+      "--run-id", "scope-run",
+      "--repo", repo,
+      "--plan", plan,
+      "--plan-digest", planDigest,
+      "--binding-json", '{"mode":"prefer","target":"codex","model":null,"source":"test"}',
+      "--egress-json", '{"sanction_source":"test","route":"codex","intermediaries":[],"exposed_material":["U-scope"],"restrictions":[]}',
+    ).word).toBe("READY")
+
+    const prepared = control(
+      runs,
+      "prepare",
+      "--run-id", "scope-run",
+      "--unit-id", "U-scope",
+      "--base", base,
+      "--packet", packetFile("U-scope packet"),
+      "--attempt-id", "attempt-1",
+      "--activity-posture", "incremental",
+    ).body
+    const resultPath = path.join(prepared.result_dir, "implementation-result.json")
+
+    const fakeBin = path.join(root, "fake-bin")
+    mkdirSync(fakeBin)
+    writeFileSync(path.join(fakeBin, "codex"), `#!/bin/sh
+set -eu
+result=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-o" ]; then result="$2"; shift 2; continue; fi
+  shift
+done
+printf '%s\n' '{"terminal_status":"scope_expansion","summary":"shared contract needed","changed_files":[],"evidence":[],"scope_expansion":{"requested_paths":["shared.ts"],"reason":"required by unit"}}' > "$result"
+`)
+    chmodSync(path.join(fakeBin, "codex"), 0o755)
+
+    const jobId = run(repo, [
+      "python3", RUNNER, "start",
+      "--skill", "ce-work",
+      "--run-id", "scope-run",
+      "--label", "U-scope",
+      "--input-digest", prepared.packet_digest,
+      "--result-path", resultPath,
+      "--no-sweep",
+      "--", ADAPTER, prepared.authorization_path, prepared.workspace, prepared.packet_path,
+      prepared.packet_digest, prepared.result_dir,
+    ], {
+      ...process.env,
+      CE_PEER_JOBS_ROOT: peerRoot,
+      CE_WORK_RUNS_ROOT: runs,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      CE_PEER_POLL_SECS: "0.1",
+      CE_PEER_IDLE_SECS: "10",
+      CE_PEER_HARD_SECS: "30",
+    })
+    expect(control(
+      runs,
+      "record-job",
+      "--run-id", "scope-run",
+      "--unit-id", "U-scope",
+      "--attempt-id", "attempt-1",
+      "--job-id", jobId,
+    ).word).toBe("AUTHORING")
+
+    expect(run(repo, [
+      "python3", RUNNER, "wait", "--max-secs", "30", jobId,
+    ], { ...process.env, CE_PEER_JOBS_ROOT: peerRoot })).toBe("done")
+    expect(control(runs, "sync-job", "--run-id", "scope-run", "--unit-id", "U-scope").body.process_state).toBe("done")
+    expect(control(runs, "terminalize", "--run-id", "scope-run", "--unit-id", "U-scope").word).toBe("INTEGRATION_PENDING")
+
+    const status = control(runs, "status", "--run-id", "scope-run", "--unit-id", "U-scope").body.unit
+    expect(status.attempts[0].terminal_receipt).toMatchObject({
+      requested_route: "codex",
+      actual_route: "codex",
+      packet_digest: prepared.packet_digest,
+      terminal_status: "scope_expansion",
+      scope_expansion_requested: true,
+    })
+    expect(JSON.parse(readFileSync(resultPath, "utf8")).scope_expansion).toEqual({
+      requested_paths: ["shared.ts"],
+      reason: "required by unit",
+    })
+  }, 30_000)
+
   test("detached fake author terminalizes a complete delta that the host verifies and commits", () => {
     const root = temp("ce-work-integration-")
     const repo = path.join(root, "repo")

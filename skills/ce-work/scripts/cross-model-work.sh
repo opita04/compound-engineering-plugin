@@ -8,7 +8,7 @@
 #
 # Routes: codex | claude | grok-cli | cursor | composer | grok-cursor
 # Output: <result-dir>/implementation-result.json and redacted adapter.log
-# Exit: 0 completed, 1 failed/blocked/schema-invalid, 2 unavailable, 3 scope expansion
+# Exit: 0 completed/scope expansion, 1 failed/blocked/schema-invalid, 2 unavailable
 #
 # Introspection (no model call):
 #   cross-model-work.sh --emit-adapter <route>
@@ -646,7 +646,6 @@ if [ "$NORMALIZE_EXIT" -ne 0 ]; then exit 1; fi
 
 TERMINAL_STATUS="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["terminal_status"])' "$RESULT_FILE")"
 case "$TERMINAL_STATUS" in
-  completed) exit 0 ;;
-  scope_expansion) exit 3 ;;
+  completed|scope_expansion) exit 0 ;;
   *) exit 1 ;;
 esac

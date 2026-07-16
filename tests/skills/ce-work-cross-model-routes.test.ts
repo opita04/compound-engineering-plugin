@@ -450,7 +450,7 @@ describe("ce-work adapter results, identity, and secret handling", () => {
     const response = '{"terminal_status":"scope_expansion","summary":"shared contract needed","changed_files":[],"evidence":[],"scope_expansion":{"requested_paths":["shared.ts"],"reason":"required by unit"}}'
     const bin = fakeBin("claude", f.capture, response)
     const result = run("claude", f, { ...process.env, PATH: `${bin}:${process.env.PATH}` })
-    expect(result.code).toBe(3)
+    expect(result.code).toBe(0)
     expect(result.result.terminal_status).toBe("scope_expansion")
     expect(result.result.scope_expansion.requested_paths).toEqual(["shared.ts"])
   })

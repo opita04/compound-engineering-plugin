@@ -190,8 +190,11 @@ def terminal_receipt(unit: dict, attempt: dict) -> dict:
         raise Operational("BLOCKED", "adapter terminal receipt does not match controller authorization", {"mismatches": mismatches})
     if receipt.get("model_receipt_status") == "mismatch":
         raise Operational("BLOCKED", "adapter reported a served-model mismatch")
-    if receipt.get("terminal_status") != "completed":
-        raise Operational("BLOCKED", "successful runner did not publish a completed adapter result")
+    terminal_status = receipt.get("terminal_status")
+    if terminal_status not in {"completed", "scope_expansion"}:
+        raise Operational("BLOCKED", "successful runner did not publish a host-resolvable adapter result")
+    if terminal_status == "scope_expansion" and not isinstance(receipt.get("scope_expansion"), dict):
+        raise Operational("BLOCKED", "scope-expansion adapter result has no expansion receipt")
     raw_log = receipt.get("raw_log")
     expected_log = os.path.join(result_dir, "adapter.log")
     if not isinstance(raw_log, str) or os.path.realpath(raw_log) != os.path.realpath(expected_log):
