@@ -37,6 +37,8 @@ A requirements-classified finding from feasibility should answer: "would the pro
 
 **Implementability** -- Could an engineer start coding tomorrow? Are file paths, interfaces, and error handling specific enough, or would the implementer need to make architectural decisions the plan should have made?
 
+**Load-bearing KTDs must be enforceable** -- For each architectural KTD that constrains multiple components, interfaces, repositories, or implementation units, confirm the complete required spine is present (`Decision`, `Binds`, `Prevents`, `Rule`; optional inherited `Provenance`), then test whether its binding surface is concrete and its `Rule` is a checkable invariant implementation and review can preserve. Flag a spine whose `Binds` is vague ("the system") or whose rule is only an aspiration ("keep it reliable"), because it cannot prevent incompatible implementation choices. Do not require the architecture spine for routine local decisions.
+
 Apply each check only when relevant. Silence is only a finding when the gap would block implementation.
 
 ## Confidence calibration

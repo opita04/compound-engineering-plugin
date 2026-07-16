@@ -1097,4 +1097,17 @@ describe("testing-reviewer contract", () => {
     // Non-behavioral changes are excluded
     expect(content).toContain("Non-behavioral changes")
   })
+
+  test("traces verification through real consumers and the normal test path", async () => {
+    const content = await readRepoFile(personaPromptPath("testing-reviewer"))
+
+    expect(content).toMatch(/real consumer boundary/i)
+    expect(content).toMatch(/focused unit test is sufficient.*self-contained/is)
+    expect(content).toMatch(/sibling (call sites|consumers)/i)
+    expect(content).toMatch(/unrelated or explicitly out-of-scope consumers do not need new proof/i)
+    expect(content).toMatch(/missing-adoption verification gap/i)
+    expect(content).toMatch(/skipped.*normal verification path/is)
+    expect(content).toMatch(/mocked away/i)
+    expect(content).toMatch(/would fail if the changed behavior regressed/i)
+  })
 })
