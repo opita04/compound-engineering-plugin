@@ -1,6 +1,6 @@
 ---
 name: ce-explain
-description: "Turn a concept, a diff, an idea, or a window of your own recent work into a dense, visual explainer written for you personally — with an optional check-in (predict-then-reveal for diffs, corrected exercises) that makes the material stick. For learning, not repo docs or verdicts."
+description: "Create a durable, visual teaching artifact — plus an optional check-in (predict-then-reveal for diffs, corrected exercises) that makes it stick — for something worth learning: a concept, a diff, an idea, or a window of your own recent work. Use when the user wants to be taught, wants a deep explainer, wants to understand a substantial change, or wants a work recap built for retention. Not for ordinary Q&A, brief 'why?' follow-ups, operational diagnosis, status updates, or a concise trade-off answer that belongs inline in chat. For learning, not repo docs or verdicts."
 argument-hint: "[a concept, a diff ref, an idea, or 'what happened this week?'] — or invoke bare to be asked"
 ---
 
@@ -36,6 +36,8 @@ Dispatch is tiered by task shape, never hardcoded to a model name:
 Read `references/intake.md` now and classify the request into one of the four input shapes — concept, diff, idea, or work-recap window. It owns the token table (`diff:`, `since:`, `output:`), the explicit-token-beats-inference rule, the concept-vs-diff tiebreak, and conflict handling. Do not improvise classification.
 
 **Bare invocation** (no input at all): ask one blocking question — "What should I explain?" — offering a shortcut option for a recap of recent work in this repo alongside free-text. Do not produce a default artifact unprompted.
+
+**Operational-question gate.** When classification lands on *concept by inference* — no `diff:`/`since:` token, no explicit ask for an explainer — and the text reads as diagnosing or operating current behavior ("why is X doing Y", "is X configured right", "what's the trade-off between A and B here") rather than learning a subject, the skill was likely auto-selected for a question better answered in chat. Answer it directly, then offer the explainer as a one-line option ("Want a durable explainer on this instead?"); build only if the user takes it, and do not create the run directory or profile the repo before then. A request that plainly wants to learn ("teach me how X works", "explain this change so it sticks") is not caught by this gate and proceeds normally. The gate is a self-correction, not a refusal — it never blocks a user who did ask for an explainer.
 
 ### Phase 2: Ground
 
