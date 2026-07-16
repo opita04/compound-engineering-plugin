@@ -55,8 +55,9 @@ describe("ce-work native characterization", () => {
     expect(engineGate).toContain("goal-mode")
     expect(engineGate).toContain("dynamic-workflow")
     expect(engineGate).toMatch(/\*\*Inline\*\* \| Trivial work/)
-    expect(engineGate).toContain("**Isolation is the harness's job, never ce-work's**")
+    expect(engineGate).toContain("ordinary native workers")
     expect(engineGate).toContain("never run `git worktree add` yourself")
+    expect(engineGate).toContain("external cross-model controller")
   })
 
   test("bounds worker scope while leaving canonical verification and commits with the orchestrator", async () => {
@@ -81,6 +82,115 @@ describe("ce-work native characterization", () => {
     expect(caller).toContain("structured summary instead of running the standalone shipping tail")
     expect(caller).toContain("standalone_shipping_skipped: true")
     expect(caller).toContain("must not open a PR")
+  })
+})
+
+describe("ce-work cross-model engine contract", () => {
+  test("adds a dormant fourth engine with exact binding precedence and config modes", async () => {
+    const skill = await readRepoFile("skills/ce-work/SKILL.md")
+    const engines = await readRepoFile("skills/ce-work/references/execution-engines.md")
+    const engineGate = sliceSection(skill, "4. **Choose Execution Engine, then Strategy**", "### Phase 2: Execute")
+
+    expect(engineGate).toContain("cross-model execution")
+    expect(engineGate).toContain("native execution remains the default")
+    expect(engines).toContain("current-turn directive > typed caller binding > per-checkout configuration > native")
+    expect(engines).toContain("work_engine_mode")
+    expect(engines).toContain("`off | prefer | require`")
+    expect(engines).toContain("work_engine_target")
+    expect(engines).toContain("work_engine_model")
+    expect(engines).toContain("`off` disables only the standing preference")
+    expect(engines).toContain("strict Composer")
+    expect(engines).toContain("caller Codex")
+    expect(engines).toContain("config Claude")
+  })
+
+  test("keeps the caller carrier implementation-only and exactly four fields", async () => {
+    const engines = await readRepoFile("skills/ce-work/references/execution-engines.md")
+    const carrier = sliceSection(engines, "### Typed caller binding", "### Target and identity vocabulary")
+
+    expect(carrier).toContain("implementation_engine")
+    for (const field of ["mode", "target", "model", "source"]) {
+      expect(carrier).toContain(`\`${field}\``)
+    }
+    expect(carrier).toContain("exactly these four fields")
+    expect(carrier).toContain("only at the `ce-work` seam")
+    expect(carrier).toContain("never enter planning or review input")
+    expect(engines).not.toContain("work_delegate_")
+  })
+
+  test("distinguishes Cursor from Composer and collapses same-host default execution", async () => {
+    const protocol = await readRepoFile("skills/ce-work/references/cross-model-execution.md")
+
+    expect(protocol).toContain("`cursor` means the Cursor harness with its configured default model")
+    expect(protocol).toContain("`composer` means a Composer-family model through Cursor")
+    expect(protocol).toContain("same-host default")
+    expect(protocol).toContain("collapse to native execution")
+    expect(protocol).toContain("codex")
+    expect(protocol).toContain("claude")
+    expect(protocol).toContain("grok")
+  })
+
+  test("defines prefer, require, fixed-recipient sanction, and restriction failure", async () => {
+    const protocol = await readRepoFile("skills/ce-work/references/cross-model-execution.md")
+
+    expect(protocol).toContain("Preference-strength")
+    expect(protocol).toContain("Requirement-strength")
+    expect(protocol).toContain("automatic or headless")
+    expect(protocol).toContain("must not prompt")
+    expect(protocol).toContain("fixed recipient")
+    expect(protocol).toContain("every intermediary")
+    expect(protocol).toContain("material exposed")
+    expect(protocol).toContain("caller restrictions")
+    expect(protocol).toContain("required restriction")
+    expect(protocol).toContain("route unavailable")
+    expect(protocol).toContain("never switch recipients")
+  })
+
+  test("preserves host-only canonical authority and narrows the worktree exception", async () => {
+    const skill = await readRepoFile("skills/ce-work/SKILL.md")
+    const protocol = await readRepoFile("skills/ce-work/references/cross-model-execution.md")
+    const engineGate = sliceSection(skill, "4. **Choose Execution Engine, then Strategy**", "### Phase 2: Execute")
+
+    expect(engineGate).toContain("ordinary native workers")
+    expect(engineGate).toContain("external cross-model controller")
+    expect(protocol).toContain("isolated transport commit")
+    expect(protocol).toContain("host-only canonical")
+    for (const forbiddenAuthority of ["canonical commit", "push", "PR", "shipping", "recipient-switch"]) {
+      expect(protocol).toContain(forbiddenAuthority)
+    }
+    expect(protocol).toContain("may narrow")
+    expect(protocol).toContain("never broaden")
+  })
+
+  test("loads the cross-model protocol only when that engine is selected", async () => {
+    const skill = await readRepoFile("skills/ce-work/SKILL.md")
+    const engineGate = sliceSection(skill, "4. **Choose Execution Engine, then Strategy**", "### Phase 2: Execute")
+
+    expect(engineGate).toContain("If and only if cross-model execution is selected")
+    expect(engineGate).toContain("read `references/cross-model-execution.md`")
+    expect(skill.match(/references\/cross-model-execution\.md/g)?.length).toBe(1)
+  })
+
+  test("returns requested and actual route, model, fallback, run, unit, blocker, and recovery receipts", async () => {
+    const skill = await readRepoFile("skills/ce-work/SKILL.md")
+    const caller = sliceSection(skill, "## Return-to-Caller Mode", "## Key Principles")
+
+    for (const receipt of [
+      "implementation_engine_binding",
+      "requested_route",
+      "actual_route",
+      "requested_model",
+      "actual_model",
+      "fallback_reason",
+      "run_id",
+      "unit_receipts",
+      "blockers",
+      "recovery_path",
+      "plan_checkpoint",
+    ]) {
+      expect(caller).toContain(receipt)
+    }
+    expect(caller).toContain("standalone_shipping_skipped: true")
   })
 })
 
