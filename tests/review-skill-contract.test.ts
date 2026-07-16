@@ -956,6 +956,21 @@ describe("cross-model peer skip legibility", () => {
     expect(skill).toContain("cannot trigger promotion")
     expect(skill).toContain("unverified Cursor default/Auto")
   })
+
+  test("review-skill behavioral eval specs exercise the fixed-route U8 contract", async () => {
+    const evalPaths = [
+      "skills/ce-code-review/references/cross-model-eval.md",
+      "skills/ce-doc-review/references/cross-model-eval.md",
+    ]
+
+    for (const evalPath of evalPaths) {
+      const src = await readRepoFile(evalPath)
+      expect(src).toContain("CROSS_MODEL_FIXED_ROUTE")
+      expect(src).toContain("independence_verified: true")
+      expect(src).toMatch(/new disclosure and sanction|newly disclosed and sanctioned/i)
+      expect(src).toMatch(/never changes? recipients? internally|no worker-internal recipient fallback/i)
+    }
+  })
 })
 
 describe("testing-reviewer contract", () => {
