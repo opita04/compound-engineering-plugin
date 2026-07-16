@@ -6,6 +6,12 @@ async function readRepoFile(relativePath: string): Promise<string> {
   return readFile(path.join(process.cwd(), relativePath), "utf8")
 }
 
+async function readCeWorkImplementationContract(): Promise<string> {
+  const skill = await readRepoFile("skills/ce-work/SKILL.md")
+  const implementationLoop = await readRepoFile("skills/ce-work/references/implementation-loop.md").catch(() => "")
+  return `${skill}\n${implementationLoop}`
+}
+
 describe("ce-work review contract", () => {
   test("requires code review before shipping", async () => {
     const content = await readRepoFile("skills/ce-work/SKILL.md")
@@ -62,7 +68,7 @@ describe("ce-work review contract", () => {
   })
 
   test("includes per-task testing deliberation in execution loop", async () => {
-    const content = await readRepoFile("skills/ce-work/SKILL.md")
+    const content = await readCeWorkImplementationContract()
 
     // Testing deliberation exists in the execution loop
     expect(content).toContain("Assess testing coverage")
@@ -172,7 +178,7 @@ describe("ce-plan testing contract", () => {
 
 describe("ce-work testing evidence contract", () => {
   test("requires evidence strategy before behavior changes and evidence in return-to-caller", async () => {
-    const content = await readRepoFile("skills/ce-work/SKILL.md")
+    const content = await readCeWorkImplementationContract()
 
     expect(content).toContain("Choose the evidence strategy for this task before changing behavior")
     expect(content).toContain("default to test-first or characterization-first")
