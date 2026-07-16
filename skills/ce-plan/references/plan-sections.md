@@ -176,6 +176,23 @@ present. They carry the contracts downstream consumers depend on.
 - **Planning Contract** — the implementation-facing decisions: Key Technical
   Decisions, high-level design, assumptions, implementation constraints,
   sequencing, and research that shapes how the Product Contract will be built.
+  For **load-bearing architectural decisions** — decisions whose violation can
+  make components, interfaces, repositories, or implementation units disagree —
+  give the KTD a compact architecture spine in addition to its rationale:
+
+  - **Decision:** the chosen direction.
+  - **Binds:** the concrete components, interfaces, R-IDs, KTDs, or U-IDs that
+    must follow it.
+  - **Prevents:** the specific failure mode or architectural drift it rules out.
+  - **Rule:** the checkable invariant implementation and review must preserve.
+  - **Provenance:** optional; for inherited decisions, cite
+    `Inherited from <repo-relative path>#<stable anchor>`.
+
+  Do not force this shape onto routine local choices. When a KTD inherits an
+  architectural decision, it must not be silently overturned. A conflict needs
+  an explicit replacement decision that names the inherited KTD, states what
+  changes, and gives the rationale; do not create a parallel inherited-decisions
+  section or mutable decision registry.
 - **Implementation Units** (with stable U-IDs) — discrete work packets sized so
   each is independently executable. Each unit names Goal, Requirements,
   Files, Approach, Test Scenarios, and Verification. `ce-work` and goal-mode
@@ -402,6 +419,12 @@ These apply regardless of rendering format.
   field. Like a `(see origin: <path>)` citation, it is decision provenance,
   not process exhaust — review passes must not strip it. A consumer that
   does not recognize the annotation treats the entry as a normal KTD.
+- **Architecture spine on load-bearing KTDs.** Use the Planning Contract's
+  `Decision` / `Binds` / `Prevents` / `Rule` fields when a decision constrains
+  multiple components, interfaces, repositories, or implementation units. Add
+  optional `Provenance` only when inheriting a prior decision. Provenance
+  complements rather than replaces any applicable `session-settled:` annotation.
+  These fields refine the KTD; they do not create another section or lifecycle.
 - **Group Requirements by concern when they span distinct logical areas.**
   The trigger is distinct concerns, not item count — even four requirements
   benefit from grouping if they cover three different topics. Skip grouping

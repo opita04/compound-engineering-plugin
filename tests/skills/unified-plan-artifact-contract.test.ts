@@ -96,6 +96,40 @@ describe("unified plan artifact contract", () => {
     expect(planSections).not.toContain("reader-index")
   })
 
+  test("load-bearing KTDs carry a provenance-aware architecture spine", () => {
+    for (const field of ["Decision", "Binds", "Prevents", "Rule"]) {
+      expect(planSections).toContain(`**${field}:**`)
+    }
+
+    expect(planSections).toMatch(/optional `Provenance` only when inheriting/i)
+    expect(planSections).toMatch(/complements rather than replaces.*`session-settled:`/is)
+    expect(planSections).toMatch(/load-bearing architectural decisions/i)
+    expect(planSections).toMatch(/Do not force this shape onto routine local choices/i)
+    expect(planSections).toMatch(/must not be silently overturned/i)
+    expect(planSections).toMatch(/explicit replacement decision/i)
+    expect(planSkill).toMatch(/load-bearing KTD.*concrete `Binds`.*checkable `Rule`/is)
+    expect(planMarkdownRendering).toMatch(/nested bullets.*visible bold labels/is)
+    expect(planMarkdownRendering).toMatch(/Ordinary KTDs retain the compact/i)
+    expect(planHtmlRendering).toMatch(/visible `Decision`, `Binds`, `Prevents`, and `Rule`/i)
+    expect(planHtmlRendering).toMatch(/optional `Provenance` only when present/i)
+    expect(planHtmlRendering).toMatch(/Ordinary KTD cards.*compact/is)
+
+    const coherenceReviewer = readRepoFile(
+      "skills/ce-doc-review/references/personas/coherence-reviewer.md",
+    )
+    const feasibilityReviewer = readRepoFile(
+      "skills/ce-doc-review/references/personas/feasibility-reviewer.md",
+    )
+
+    expect(coherenceReviewer).toMatch(/inherited KTD.*silently overturned/is)
+    expect(coherenceReviewer).toMatch(/explicit replacement decision/i)
+    expect(coherenceReviewer).toMatch(/`Decision`, `Binds`, `Prevents`, and `Rule` are required/i)
+    expect(coherenceReviewer).toMatch(/`Provenance` is optional/i)
+    expect(feasibilityReviewer).toMatch(/load-bearing KTDs.*binding surface/is)
+    expect(feasibilityReviewer).toMatch(/complete required spine.*`Decision`.*`Prevents`/is)
+    expect(feasibilityReviewer).toMatch(/checkable invariant/i)
+  })
+
   test("brainstorm writes requirements-only unified plan skeletons under docs/plans", () => {
     expect(brainstormSections).toContain("docs/plans/YYYY-MM-DD-NNN-<type>-<topic>-plan")
     expect(brainstormSections).toContain("artifact_readiness: requirements-only")

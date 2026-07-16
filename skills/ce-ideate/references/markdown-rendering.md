@@ -138,7 +138,11 @@ contracts — the agent picks the shape that fits the content.
 - **Key Technical Decisions** — bullets with bold decision name + prose
   rationale, or numbered KTD-N pattern when traceability matters. A
   `session-settled:` annotation renders as part of the KTD bullet's
-  visible text, stem preserved verbatim.
+  visible text, stem preserved verbatim. For a load-bearing architectural
+  KTD, keep the decision bullet and render `Decision`, `Binds`, `Prevents`,
+  and `Rule` as nested bullets with visible bold labels; render optional
+  `Provenance` the same way only when present. Ordinary KTDs retain the compact
+  decision-plus-rationale form.
 - **Key Flows / Acceptance Examples** — bullets with bold leader labels
   (Trigger / Actors / Steps / Outcome / Covers / Given-When-Then).
 - **Scope Boundaries** — bullets, optionally split into "Deferred for

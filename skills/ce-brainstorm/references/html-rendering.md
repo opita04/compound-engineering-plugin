@@ -361,7 +361,10 @@ contracts — the agent picks shapes that fit the content.
   these are reference material readers scan, not drill into. A
   `session-settled:` annotation renders as visible text in the card —
   never an attribute or hidden markup — stem preserved verbatim so
-  grep works on the HTML artifact.
+  grep works on the HTML artifact. A load-bearing architectural KTD's card
+  also renders visible `Decision`, `Binds`, `Prevents`, and `Rule` labels and
+  values; render optional `Provenance` only when present. Ordinary KTD cards
+  retain the compact title-plus-rationale form.
 - **Risks** — cards with a color-coded status eyebrow (e.g., "RISK ·
   MITIGATED" / "OPEN · DEFERRED FOLLOW-UP") and prose body. Communicate
   status through the eyebrow's color plus an optional subtle full-card
