@@ -1,7 +1,7 @@
 ---
 name: ce-work
-description: Execute a plan or concrete work prompt end-to-end. Use when implementing from docs/plans, a spec path, or a clear build request; use ce-debug for open-ended bugs. Standalone use owns the shipping tail; outer orchestrators pass `mode:return-to-caller [implementation_engine:<compact-json>] <plan path>` for implementation and local verification only.
-argument-hint: "[Plan path or work description; blank uses latest] | [mode:return-to-caller [implementation_engine:<compact-json>] <plan path> for outer orchestrators]"
+description: Execute a plan or concrete work prompt end-to-end. Use when implementing from docs/plans, a spec path, or a clear build request; use ce-debug for open-ended bugs. Standalone use owns the shipping tail; outer orchestrators pass `mode:return-to-caller [implementation_engine:<compact-json>] [implementation_run:<safe-id>] <plan path>` for implementation, recovery, and local verification only.
+argument-hint: "[Plan path, work description, or recovery request with run id; blank uses latest] | [mode:return-to-caller [implementation_engine:<compact-json>] [implementation_run:<safe-id>] <plan path> for outer orchestrators]"
 ---
 
 # Work Execution Command
@@ -21,7 +21,11 @@ The **input document** for this run is the input this skill was invoked with —
 
 ### Phase 0: Input Triage
 
-**First, parse a leading mode token.** If `<input_document>` begins with `mode:return-to-caller` (or the legacy aliases `mode:caller-owned-tail` / `caller:lfg`), strip that token before anything else and enter **Return-to-Caller Mode** (see § Return-to-Caller Mode) — implement and locally verify only, then return the structured envelope instead of running the standalone shipping tail. The next item may be one compact JSON object prefixed exactly `implementation_engine:`; when present, consume it as the typed caller binding, require exactly `mode`, `target`, `model`, and `source` with the types and values defined in `references/execution-engines.md`, and reject malformed JSON, missing/extra fields, or a second carrier. The entire remaining string is the plan path. Classify that stripped plan path with the rules below. A mode token with no following path is an error; a carrier with no following path is also an error. Report either instead of treating the control data as a bare prompt. Without the optional carrier, the original `mode:return-to-caller <plan-path>` form is unchanged and standing configuration remains eligible.
+**Recovery activation comes first.** Before normal plan, path, blank-input, or bare-prompt classification, interpret whether the user is semantically asking to resume, inspect status, reap, or clean up an existing external implementation run and has supplied its run id. This is intent recognition, not verb-only matching. Validate the id with the controller's safe-id contract: `^[A-Za-z0-9._-]{1,128}$` and at least one non-period character. When this direct recovery intent is present, read `references/cross-model-execution.md`, use that run id as authoritative for the requested controller operation, and return the observed state or blocker. Recovery must not dispatch a new worker, select a new route, fall through to latest-plan discovery, or run either shipping tail. If recovery intent is clear but the run id is missing, request the id instead of guessing or classifying the text as new work.
+
+**Otherwise, parse a leading mode token.** If `<input_document>` begins with `mode:return-to-caller` (or the legacy aliases `mode:caller-owned-tail` / `caller:lfg`), strip that token before anything else and enter **Return-to-Caller Mode** (see § Return-to-Caller Mode) — implement and locally verify only, then return the structured envelope instead of running the standalone shipping tail. Before the plan path, accept up to two optional carriers in this fixed order: first one compact JSON object prefixed exactly `implementation_engine:`, then one run id prefixed exactly `implementation_run:`. The engine object remains the typed caller binding and must contain exactly `mode`, `target`, `model`, and `source` with the types and values defined in `references/execution-engines.md`; the run carrier is accepted only for return-to-caller recovery and must satisfy the safe-id contract above. Reject malformed JSON, missing/extra fields, an unsafe run id, or a duplicate carrier. The entire remaining string is the plan path. A mode token or carrier with no following path is an error; report it instead of treating control data as a bare prompt. Without either optional carrier, the original `mode:return-to-caller <plan-path>` form is unchanged and standing configuration remains eligible.
+
+When `implementation_run:<safe-id>` is present, recovery wins over ordinary input classification: read `references/cross-model-execution.md`, use `resume --run-id <safe-id>` as the authoritative entrypoint, and return the normal Return-to-Caller envelope after reconciliation. Preserve the supplied `implementation_engine` binding when present. Do not resolve a different route, redispatch, reimplement, or start another caller tail.
 
 Determine how to proceed based on what was provided in `<input_document>` (after any mode token is stripped).
 
@@ -301,7 +305,7 @@ When all Phase 2 tasks are complete and execution transitions to quality check, 
 
 ## Return-to-Caller Mode
 
-`mode:return-to-caller <plan-path>` (legacy alias: `mode:caller-owned-tail`) is
+`mode:return-to-caller [implementation_engine:<compact-json>] [implementation_run:<safe-id>] <plan-path>` (legacy alias: `mode:caller-owned-tail`) is
 reserved for orchestrators such as `lfg` that own the post-implementation
 shipping gates (final simplify, code review, PR creation, and CI watching).
 In this mode `ce-work` performs implementation and local verification only —

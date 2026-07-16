@@ -38,13 +38,25 @@ describe("ce-work native characterization", () => {
     const skill = await readRepoFile("skills/ce-work/SKILL.md")
     const triage = sliceSection(skill, "### Phase 0: Input Triage", "### Phase 1: Quick Start")
 
-    expect(triage).toContain("**First, parse a leading mode token.**")
+    expect(triage).toContain("**Otherwise, parse a leading mode token.**")
     expect(triage).toContain("mode:return-to-caller")
     expect(triage).toContain("mode:caller-owned-tail")
     expect(triage).toContain("caller:lfg")
     expect(triage).toContain("**Plan document**")
     expect(triage).toContain("**Blank invocation latest-plan discovery:**")
     expect(triage).toContain("**Bare prompt**")
+  })
+
+  test("activates direct recovery before ordinary input classification", async () => {
+    const skill = await readRepoFile("skills/ce-work/SKILL.md")
+    const triage = sliceSection(skill, "### Phase 0: Input Triage", "### Phase 1: Quick Start")
+
+    expect(triage).toContain("**Recovery activation comes first.**")
+    expect(triage).toContain("resume, inspect status, reap, or clean up")
+    expect(triage).toContain("implementation_run:<safe-id>")
+    expect(triage).toContain("read `references/cross-model-execution.md`")
+    expect(triage).toContain("must not dispatch a new worker")
+    expect(triage.indexOf("**Recovery activation comes first.**")).toBeLessThan(triage.indexOf("**Otherwise, parse a leading mode token.**"))
   })
 
   test("keeps the existing native engines and synchronous inline path", async () => {
@@ -127,9 +139,21 @@ describe("ce-work cross-model engine contract", () => {
     expect(phase0).toContain("implementation_engine:")
     expect(phase0).toContain("one compact JSON object")
     expect(phase0).toContain("exactly `mode`, `target`, `model`, and `source`")
-    expect(phase0).toContain("reject malformed JSON, missing/extra fields, or a second carrier")
+    expect(phase0).toContain("implementation_run:<safe-id>")
+    expect(phase0).toContain("`^[A-Za-z0-9._-]{1,128}$`")
+    expect(phase0).toContain("Reject malformed JSON, missing/extra fields, an unsafe run id, or a duplicate carrier")
     expect(phase0).toContain("entire remaining string is the plan path")
     expect(phase0).toContain("original `mode:return-to-caller <plan-path>` form is unchanged")
+  })
+
+  test("keeps external dispatch policy out of the implementation-worker persona", async () => {
+    const worker = await readRepoFile("skills/ce-work/references/agents/implementation-worker.md")
+
+    expect(worker).toContain("caller, unit packet, and controller own dispatch")
+    expect(worker).toContain("Implement exactly the supplied implementation unit")
+    for (const dispatchPolicy of ["recipient", "model", "harness", "intermediary", "retry", "route", "additional workers"]) {
+      expect(worker.toLowerCase()).not.toContain(dispatchPolicy)
+    }
   })
 
   test("distinguishes Cursor from Composer and collapses same-host default execution", async () => {
@@ -176,13 +200,15 @@ describe("ce-work cross-model engine contract", () => {
     expect(protocol).toContain("never broaden")
   })
 
-  test("loads the cross-model protocol only when that engine is selected", async () => {
+  test("loads the cross-model protocol only for selected execution or recovery", async () => {
     const skill = await readRepoFile("skills/ce-work/SKILL.md")
     const engineGate = sliceSection(skill, "4. **Choose Execution Engine, then Strategy**", "### Phase 2: Execute")
+    const triage = sliceSection(skill, "### Phase 0: Input Triage", "**Plan document**")
 
     expect(engineGate).toContain("If and only if cross-model execution is selected")
     expect(engineGate).toContain("read `references/cross-model-execution.md`")
-    expect(skill.match(/references\/cross-model-execution\.md/g)?.length).toBe(1)
+    expect(triage.match(/references\/cross-model-execution\.md/g)?.length).toBe(2)
+    expect(skill.match(/references\/cross-model-execution\.md/g)?.length).toBe(3)
   })
 
   test("returns requested and actual route, model, fallback, run, unit, blocker, and recovery receipts", async () => {
@@ -215,6 +241,7 @@ describe("ce-work cross-model engine contract", () => {
       "unit-workspace.py` `init",
       "unit-workspace.py` `checkpoint-plan",
       "unit-workspace.py` `prepare",
+      "unit-workspace.py` `authorize-dispatch",
       "peer-job-runner.py` `start --no-sweep",
       "cross-model-work.sh",
       "unit-workspace.py` `record-job",
@@ -230,6 +257,17 @@ describe("ce-work cross-model engine contract", () => {
     ]) {
       expect(serial).toContain(command)
     }
+    expect(serial).toContain("cross-model-work.sh <authorization_path> <workspace> <unit-packet> <expected-packet-sha256> <result-dir>")
+    expect(serial).toContain("controller-returned `authorization_path`")
+    expect(serial).toContain("`run_id`, `unit_id`, and `attempt_id`")
+    expect(serial).toContain("controller `authorize-dispatch` success")
+    expect(serial).toContain("authorization digest, workspace, packet path and digest, and result directory")
+    expect(serial).toContain("hand-authored or cross-attempt authorization")
+    expect(serial).toContain("exact route, model, and intermediary contract")
+    expect(serial).toMatch(/before prompt construction or external CLI start/i)
+    expect(serial).toContain("`--emit-adapter` mode remains introspection only")
+    expect(serial).not.toContain("CE_WORK_MODEL_OVERRIDE")
+    expect(serial).not.toContain("CE_WORK_MODEL_OVERRIDE_TARGET")
     expect(serial).toContain("one bounded unit packet")
     expect(serial).toContain("inspect the actual transport diff")
     expect(serial).toContain("authoritative canonical verification")
@@ -326,7 +364,7 @@ describe("ce-work cross-model engine contract", () => {
     expect(evalPack).toContain("Change")
     expect(evalPack).toContain("Verify")
     expect(evalPack).toContain("Consider")
-    for (let fixture = 1; fixture <= 20; fixture += 1) {
+    for (let fixture = 1; fixture <= 22; fixture += 1) {
       expect(evalPack).toContain(`E${fixture} `)
     }
     for (const seam of [
@@ -342,9 +380,12 @@ describe("ce-work cross-model engine contract", () => {
       "transactional failure",
       "return boundary",
       "linked-checkout sibling",
+      "direct recovery",
+      "LFG recovery carrier",
     ]) {
       expect(evalPack).toContain(seam)
     }
+    expect(evalPack).toContain("| E20 linked-checkout sibling | CE Work is itself running in an existing linked worktree and selects external implementation for one unit | Create a new detached **sibling** through the repository's shared Git common directory, place it under `/tmp/compound-engineering/ce-work/<run-id>/` rather than beneath the active checkout, base it at the recorded clean canonical SHA, and keep canonical fold-in host-owned. Do not reject the route merely because the active checkout is already a worktree, and do not create a nested worktree. |")
   })
 })
 

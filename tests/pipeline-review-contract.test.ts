@@ -260,11 +260,11 @@ describe("verification_evidence seam parity (ce-work <-> lfg)", () => {
       "3. Invoke the `ce-simplify-code`"
     )
 
-    // One-shot retry on the same plan path (idempotency backfill), no user prompt.
-    expect(gate).toContain(
-      "invoke `ce-work` one more time with the exact same step-2 argument"
-    )
-    expect(gate).toContain("Do not prompt the user and do not alter the plan path argument")
+    // One-shot recovery on the same plan and engine binding, with the returned durable run id.
+    expect(gate).toContain("invoke `ce-work` one more time in recovery mode")
+    expect(gate).toContain("same `implementation_engine:<compact-json>` carrier")
+    expect(gate).toContain("implementation_run:<safe-id>")
+    expect(gate).toContain("Do not prompt the user and do not alter the plan path or engine carrier")
     // Second still-missing return stops blocked instead of continuing to ship.
     expect(gate).toContain("stop as blocked and report the missing fields")
     expect(gate).toContain("instead of continuing to simplify/review/ship")

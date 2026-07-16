@@ -14,6 +14,7 @@ import path from "node:path"
 
 const CONTROLLER = path.join(process.cwd(), "skills/ce-work/scripts/unit-workspace.py")
 const RUNNER = path.join(process.cwd(), "skills/ce-work/scripts/peer-job-runner.py")
+const ADAPTER = path.join(process.cwd(), "skills/ce-work/scripts/cross-model-work.sh")
 const roots: string[] = []
 
 function temp(prefix: string): string {
@@ -32,6 +33,12 @@ function run(cwd: string, argv: string[], env: NodeJS.ProcessEnv = process.env) 
 
 function git(repo: string, ...args: string[]): string {
   return run(repo, ["git", ...args])
+}
+
+function packetFile(content: string): string {
+  const packet = path.join(temp("ce-work-packet-"), "unit.md")
+  writeFileSync(packet, content, { mode: 0o600 })
+  return packet
 }
 
 function control(runs: string, ...args: string[]) {
@@ -58,24 +65,35 @@ function controlFailure(runs: string, ...args: string[]) {
   return { status: result.status, word, body: body.length ? JSON.parse(body.join("\n")) : null }
 }
 
-function fakeDoneJob(runs: string, runId: string, unitId: string, packetDigest: string, jobId: string) {
+function fakeDoneJob(runs: string, runId: string, unitId: string, packetContent: string, jobId: string) {
   const dir = path.join(runs, runId, "jobs", jobId)
   mkdirSync(dir, { recursive: true, mode: 0o700 })
   chmodSync(path.join(runs, runId, "jobs"), 0o700)
   chmodSync(dir, 0o700)
-  const resultPath = path.join(runs, runId, "units", unitId, "result", "implementation-result.json")
+  const digest = createHash("sha256").update(packetContent).digest("hex")
+  const unitRoot = path.join(runs, runId, "units", unitId)
+  const resultDir = path.join(unitRoot, "result")
+  const resultPath = path.join(resultDir, "implementation-result.json")
+  const logPath = path.join(resultDir, "adapter.log")
   writeFileSync(path.join(dir, "meta.json"), `${JSON.stringify({
     job_id: jobId,
     skill: "ce-work",
     run_id: runId,
     label: unitId,
-    input_digest: packetDigest,
+    input_digest: digest,
     result_path: resultPath,
+    worker_argv: [ADAPTER, path.join(unitRoot, "authorization.json"), path.join(unitRoot, "workspace"), path.join(unitRoot, "packet.md"), digest, resultDir],
   })}\n`, { mode: 0o600 })
   writeFileSync(path.join(dir, "status"), "done\n", { mode: 0o600 })
   writeFileSync(path.join(dir, "reason"), "worker exited 0\n", { mode: 0o600 })
   writeFileSync(path.join(dir, "out.log"), "activity\n", { mode: 0o600 })
-  writeFileSync(resultPath, '{"terminal_status":"completed","summary":"done","changed_files":[],"evidence":["fake"],"scope_expansion":null}\n', { mode: 0o600 })
+  writeFileSync(logPath, "activity\n", { mode: 0o600 })
+  writeFileSync(resultPath, `${JSON.stringify({
+    schema_version: 1, terminal_status: "completed", summary: "done", changed_files: [], evidence: ["fake"], scope_expansion: null,
+    requested_route: "codex", actual_route: "codex", target: "codex", harness: "codex", intermediaries: [],
+    model_requested: "auto", model_actual: "unverified", model_receipt_status: "unverified", activity_posture: "incremental",
+    restriction_posture: "adapter-enforced", failure_reason: null, raw_log: logPath, packet_digest: digest,
+  })}\n`, { mode: 0o600 })
   return jobId
 }
 
@@ -114,14 +132,14 @@ describe("ce-work serial cross-model transaction", () => {
       "--egress-json", '{"sanction_source":"test","route":"codex","intermediaries":[],"exposed_material":["U4a"],"restrictions":[]}',
     ).word).toBe("READY")
 
-    const packetDigest = createHash("sha256").update("U4a packet").digest("hex")
+    const packet = packetFile("U4a packet")
     const prepared = control(
       runs,
       "prepare",
       "--run-id", "serial-run",
       "--unit-id", "U4a",
       "--base", base,
-      "--packet-digest", packetDigest,
+      "--packet", packet,
       "--attempt-id", "attempt-1",
       "--activity-posture", "incremental",
     )
@@ -129,13 +147,18 @@ describe("ce-work serial cross-model transaction", () => {
     const workspace = prepared.body.workspace as string
     const resultDir = prepared.body.result_dir as string
     const resultPath = path.join(resultDir, "implementation-result.json")
+    const packetDigest = prepared.body.packet_digest as string
 
-    const fake = path.join(root, "fake-adapter.sh")
-    writeFileSync(fake, `#!/bin/sh
+    const fakeBin = path.join(root, "fake-bin")
+    mkdirSync(fakeBin)
+    const fakeCodex = path.join(fakeBin, "codex")
+    writeFileSync(fakeCodex, `#!/bin/sh
 set -eu
-workspace="$1"
-result="$2"
-cd "$workspace"
+result=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-o" ]; then result="$2"; shift 2; continue; fi
+  shift
+done
 printf 'committed\n' > existing.txt
 git add existing.txt
 git -c user.name=Worker -c user.email=worker@example.test commit -m 'worker intermediate' >/dev/null
@@ -144,7 +167,7 @@ python3 -c 'open("binary.bin", "wb").write(bytes([0,255,1]))'
 git mv delete.txt renamed.txt
 printf '%s\n' '{"terminal_status":"completed","summary":"done","changed_files":["existing.txt","binary.bin","renamed.txt"],"evidence":["fake"],"scope_expansion":null}' > "$result"
 `)
-    chmodSync(fake, 0o755)
+    chmodSync(fakeCodex, 0o755)
 
     const jobId = run(repo, [
       "python3", RUNNER, "start",
@@ -154,10 +177,12 @@ printf '%s\n' '{"terminal_status":"completed","summary":"done","changed_files":[
       "--input-digest", packetDigest,
       "--result-path", resultPath,
       "--no-sweep",
-      "--", fake, workspace, resultPath,
+      "--", ADAPTER, prepared.body.authorization_path, workspace, prepared.body.packet_path, packetDigest, resultDir,
     ], {
       ...process.env,
       CE_PEER_JOBS_ROOT: peerRoot,
+      CE_WORK_RUNS_ROOT: runs,
+      PATH: `${fakeBin}:${process.env.PATH}`,
       CE_PEER_POLL_SECS: "0.1",
       CE_PEER_IDLE_SECS: "10",
       CE_PEER_HARD_SECS: "30",
@@ -253,7 +278,7 @@ printf '%s\n' '{"terminal_status":"completed","summary":"done","changed_files":[
     for (const unit of units) {
       const prepared = control(
         runs, "prepare", "--run-id", "wave-run", "--unit-id", unit.id,
-        "--base", base, "--packet-digest", unit.packet,
+        "--base", base, "--packet", packetFile(unit.packet),
         "--wave-id", "wave-1", "--wave-position", unit.position,
       )
       expect(prepared.word).toBe("PREPARED")

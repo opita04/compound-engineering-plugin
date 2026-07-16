@@ -17,6 +17,7 @@ import path from "node:path"
 import { createHash } from "node:crypto"
 
 const SCRIPT = path.join(__dirname, "../../skills/ce-work/scripts/unit-workspace.py")
+const ADAPTER = path.join(__dirname, "../../skills/ce-work/scripts/cross-model-work.sh")
 const roots: string[] = []
 
 function tmp(prefix: string): string {
@@ -52,6 +53,16 @@ function makeRepo(): { repo: string; plan: string; digest: string; base: string 
   git(repo, "commit", "-m", "seed")
   const digest = createHash("sha256").update(readFileSync(plan)).digest("hex")
   return { repo, plan, digest, base: git(repo, "rev-parse", "HEAD") }
+}
+
+function packetFile(content: string): string {
+  const packet = path.join(tmp("ce-work-packet-"), "unit.md")
+  writeFileSync(packet, content, { mode: 0o600 })
+  return packet
+}
+
+function packetDigest(content: string): string {
+  return createHash("sha256").update(content).digest("hex")
 }
 
 function ctl(runsRoot: string, ...args: string[]) {
@@ -96,18 +107,55 @@ function initWithBinding(
   )
 }
 
-function fakeRunningJob(runsRoot: string, runId: string, unitId: string, packetDigest: string, id = "job-live") {
+function authorizeDispatch(
+  runsRoot: string,
+  runId: string,
+  unitId: string,
+  prepared: any,
+  overrides: Record<string, string> = {},
+) {
+  const values = {
+    runId,
+    unitId,
+    attemptId: "attempt-1",
+    authorization: prepared.authorization_path,
+    authorizationDigest: prepared.authorization_digest,
+    workspace: prepared.workspace,
+    packet: prepared.packet_path,
+    packetDigest: prepared.packet_digest,
+    resultDir: prepared.result_dir,
+    ...overrides,
+  }
+  return ctl(
+    runsRoot,
+    "authorize-dispatch",
+    "--run-id", values.runId,
+    "--unit-id", values.unitId,
+    "--attempt-id", values.attemptId,
+    "--authorization", values.authorization,
+    "--authorization-digest", values.authorizationDigest,
+    "--workspace", values.workspace,
+    "--packet", values.packet,
+    "--packet-digest", values.packetDigest,
+    "--result-dir", values.resultDir,
+  )
+}
+
+function fakeRunningJob(runsRoot: string, runId: string, unitId: string, packetContent: string, id = "job-live") {
   const dir = path.join(runsRoot, runId, "jobs", id)
   mkdirSync(dir, { recursive: true, mode: 0o700 })
   chmodSync(path.join(runsRoot, runId, "jobs"), 0o700)
   chmodSync(dir, 0o700)
+  const digest = packetDigest(packetContent)
+  const unitRoot = path.join(runsRoot, runId, "units", unitId)
   const meta = {
     job_id: id,
     skill: "ce-work",
     run_id: runId,
     label: unitId,
-    input_digest: packetDigest,
-    result_path: path.join(runsRoot, runId, "units", unitId, "result", "implementation-result.json"),
+    input_digest: digest,
+    result_path: path.join(unitRoot, "result", "implementation-result.json"),
+    worker_argv: [ADAPTER, path.join(unitRoot, "authorization.json"), path.join(unitRoot, "workspace"), path.join(unitRoot, "packet.md"), digest, path.join(unitRoot, "result")],
   }
   for (const [name, value] of [
     ["meta.json", JSON.stringify(meta) + "\n"],
@@ -128,18 +176,24 @@ function terminalizeFakeJob(runsRoot: string, runId: string, id: string, state: 
   chmodSync(path.join(dir, "reason"), 0o600)
 }
 
-function fakeDoneJob(runsRoot: string, runId: string, unitId: string, packetDigest: string, id = "job-1") {
+function fakeDoneJob(runsRoot: string, runId: string, unitId: string, packetContent: string, id = "job-1") {
   const dir = path.join(runsRoot, runId, "jobs", id)
   mkdirSync(dir, { recursive: true, mode: 0o700 })
   chmodSync(path.join(runsRoot, runId, "jobs"), 0o700)
   chmodSync(dir, 0o700)
+  const digest = packetDigest(packetContent)
+  const unitRoot = path.join(runsRoot, runId, "units", unitId)
+  const resultDir = path.join(unitRoot, "result")
+  const resultPath = path.join(resultDir, "implementation-result.json")
+  const logPath = path.join(resultDir, "adapter.log")
   const meta = {
     job_id: id,
     skill: "ce-work",
     run_id: runId,
     label: unitId,
-    input_digest: packetDigest,
-    result_path: path.join(runsRoot, runId, "units", unitId, "result", "implementation-result.json"),
+    input_digest: digest,
+    result_path: resultPath,
+    worker_argv: [ADAPTER, path.join(unitRoot, "authorization.json"), path.join(unitRoot, "workspace"), path.join(unitRoot, "packet.md"), digest, resultDir],
   }
   for (const [name, value] of [
     ["meta.json", JSON.stringify(meta) + "\n"],
@@ -150,6 +204,30 @@ function fakeDoneJob(runsRoot: string, runId: string, unitId: string, packetDige
     writeFileSync(path.join(dir, name), value as string, { mode: 0o600 })
     chmodSync(path.join(dir, name), 0o600)
   }
+  writeFileSync(logPath, "adapter activity\n", { mode: 0o600 })
+  chmodSync(logPath, 0o600)
+  writeFileSync(resultPath, `${JSON.stringify({
+    schema_version: 1,
+    terminal_status: "completed",
+    summary: "done",
+    changed_files: [],
+    evidence: ["fake"],
+    scope_expansion: null,
+    requested_route: "codex",
+    actual_route: "codex",
+    target: "codex",
+    harness: "codex",
+    intermediaries: [],
+    model_requested: "auto",
+    model_actual: "unverified",
+    model_receipt_status: "unverified",
+    activity_posture: "incremental",
+    restriction_posture: "adapter-enforced",
+    failure_reason: null,
+    raw_log: logPath,
+    packet_digest: digest,
+  })}\n`, { mode: 0o600 })
+  chmodSync(resultPath, 0o600)
   return id
 }
 
@@ -186,6 +264,114 @@ describe("ce-work unit workspace controller", () => {
     expect(ctl(runs, "init", "--run-id", "outside", "--repo", f.repo, "--plan", outside, "--plan-digest", digest).word).toBe("REFUSED")
   })
 
+  test("owns packet bytes and rejects route or receipt substitution", () => {
+    const f = makeRepo()
+    const runs = path.join(tmp("ce-work-runs-"), "ce-work")
+    init(runs, "run-authority", f)
+    const source = packetFile("authorized packet")
+    const prepared = ctl(
+      runs, "prepare", "--run-id", "run-authority", "--unit-id", "U", "--base", f.base, "--packet", source,
+    )
+    expect(prepared.word).toBe("PREPARED")
+    expect(prepared.body.packet_digest).toBe(packetDigest("authorized packet"))
+    expect(readFileSync(prepared.body.packet_path, "utf8")).toBe("authorized packet")
+    const authorizationText = readFileSync(prepared.body.authorization_path, "utf8")
+    const authorization = JSON.parse(authorizationText)
+    expect(authorization).toEqual({
+      schema_version: 1,
+      run_id: "run-authority",
+      unit_id: "U",
+      attempt_id: "attempt-1",
+      route: "codex",
+      target: "codex",
+      harness: "codex",
+      intermediaries: [],
+      model_requested: "auto",
+      restriction_posture: "adapter-enforced",
+      restrictions: [],
+      activity_posture: "hard-only",
+      packet_digest: packetDigest("authorized packet"),
+    })
+    expect(prepared.body.authorization_digest).toBe(packetDigest(readFileSync(prepared.body.authorization_path, "utf8")))
+    writeFileSync(source, "substituted packet")
+    expect(ctl(
+      runs, "prepare", "--run-id", "run-authority", "--unit-id", "U", "--base", f.base, "--packet", source,
+    ).word).toBe("BLOCKED")
+    writeFileSync(source, "authorized packet", { mode: 0o600 })
+    writeFileSync(prepared.body.authorization_path, `${JSON.stringify({ ...authorization, route: "claude" })}\n`, { mode: 0o600 })
+    chmodSync(prepared.body.authorization_path, 0o600)
+    expect(ctl(
+      runs, "prepare", "--run-id", "run-authority", "--unit-id", "U", "--base", f.base, "--packet", source,
+    ).word).toBe("BLOCKED")
+    writeFileSync(prepared.body.authorization_path, authorizationText, { mode: 0o600 })
+    chmodSync(prepared.body.authorization_path, 0o600)
+
+    const job = fakeDoneJob(runs, "run-authority", "U", "authorized packet", "job-authority")
+    const metaPath = path.join(runs, "run-authority", "jobs", job, "meta.json")
+    const meta = JSON.parse(readFileSync(metaPath, "utf8"))
+    meta.worker_argv[1] = path.join(runs, "run-authority", "units", "U", "other-authorization.json")
+    writeFileSync(metaPath, `${JSON.stringify(meta)}\n`, { mode: 0o600 })
+    chmodSync(metaPath, 0o600)
+    expect(ctl(
+      runs, "record-job", "--run-id", "run-authority", "--unit-id", "U", "--attempt-id", "attempt-1", "--job-id", job,
+    ).word).toBe("BLOCKED")
+    meta.worker_argv[1] = prepared.body.authorization_path
+    writeFileSync(metaPath, `${JSON.stringify(meta)}\n`, { mode: 0o600 })
+    chmodSync(metaPath, 0o600)
+    expect(ctl(
+      runs, "record-job", "--run-id", "run-authority", "--unit-id", "U", "--attempt-id", "attempt-1", "--job-id", job,
+    ).word).toBe("AUTHORING")
+    const resultPath = path.join(runs, "run-authority", "units", "U", "result", "implementation-result.json")
+    const result = JSON.parse(readFileSync(resultPath, "utf8"))
+    result.actual_route = "claude"
+    writeFileSync(resultPath, `${JSON.stringify(result)}\n`, { mode: 0o600 })
+    chmodSync(resultPath, 0o600)
+    const blocked = ctl(runs, "terminalize", "--run-id", "run-authority", "--unit-id", "U")
+    expect(blocked.word).toBe("BLOCKED")
+    expect(blocked.body.mismatches.actual_route).toEqual({ expected: "codex", actual: "claude" })
+  })
+
+  test("authorizes dispatch only for the exact recorded run unit attempt and paths", () => {
+    const f = makeRepo()
+    const runs = path.join(tmp("ce-work-runs-"), "ce-work")
+    init(runs, "run-handshake", f)
+    const first = ctl(
+      runs, "prepare", "--run-id", "run-handshake", "--unit-id", "U-a", "--base", f.base,
+      "--packet", packetFile("packet-a"), "--attempt-id", "attempt-1",
+    ).body
+    const second = ctl(
+      runs, "prepare", "--run-id", "run-handshake", "--unit-id", "U-b", "--base", f.base,
+      "--packet", packetFile("packet-b"), "--attempt-id", "attempt-1",
+    ).body
+    const revision = ctl(runs, "status", "--run-id", "run-handshake").body.revision
+    const authorized = authorizeDispatch(runs, "run-handshake", "U-a", first)
+    expect(authorized.word).toBe("AUTHORIZED")
+    expect(authorized.body).toMatchObject({
+      run_id: "run-handshake",
+      unit_id: "U-a",
+      attempt_id: "attempt-1",
+      authorization_digest: first.authorization_digest,
+      packet_digest: first.packet_digest,
+    })
+    expect(ctl(runs, "status", "--run-id", "run-handshake").body.revision).toBe(revision)
+
+    const handAuth = packetFile(readFileSync(first.authorization_path, "utf8"))
+    expect(authorizeDispatch(runs, "run-handshake", "U-a", first, { authorization: handAuth }).word).toBe("BLOCKED")
+    expect(authorizeDispatch(runs, "run-handshake", "U-a", first, { attemptId: "attempt-2" }).word).toBe("AMBIGUOUS")
+    expect(authorizeDispatch(runs, "run-handshake", "U-b", second, {
+      authorization: first.authorization_path,
+      authorizationDigest: first.authorization_digest,
+    }).word).toBe("BLOCKED")
+    expect(authorizeDispatch(runs, "run-handshake", "U-a", first, { authorizationDigest: "0".repeat(64) }).word).toBe("BLOCKED")
+    expect(authorizeDispatch(runs, "run-handshake", "U-a", first, { workspace: second.workspace }).word).toBe("BLOCKED")
+    expect(authorizeDispatch(runs, "run-handshake", "U-a", first, { packet: second.packet_path }).word).toBe("BLOCKED")
+    expect(authorizeDispatch(runs, "run-handshake", "U-a", first, { packetDigest: second.packet_digest }).word).toBe("BLOCKED")
+    expect(authorizeDispatch(runs, "run-handshake", "U-a", first, { resultDir: second.result_dir }).word).toBe("BLOCKED")
+
+    init(runs, "run-hand-authored", f)
+    expect(authorizeDispatch(runs, "run-hand-authored", "fake-unit", first).word).toBe("REFUSED")
+  })
+
   test("creates a detached sibling from a linked checkout and terminalizes the complete tree", () => {
     const f = makeRepo()
     const linked = path.join(tmp("ce-work-linked-"), "linked")
@@ -194,7 +380,7 @@ describe("ce-work unit workspace controller", () => {
     f.plan = path.join(linked, "docs", "plans", "plan.md")
     const runs = path.join(tmp("ce-work-runs-"), "ce-work")
     expect(init(runs, "run-tree", f).word).toBe("READY")
-    expect(ctl(runs, "prepare", "--run-id", "run-tree", "--unit-id", "U2", "--base", f.base, "--packet-digest", "packet").word).toBe("PREPARED")
+    expect(ctl(runs, "prepare", "--run-id", "run-tree", "--unit-id", "U2", "--base", f.base, "--packet", packetFile("packet")).word).toBe("PREPARED")
     const workspace = path.join(runs, "run-tree", "units", "U2", "workspace")
     const linkedReal = realpathSync(linked)
     const workspaceReal = realpathSync(workspace)
@@ -228,9 +414,21 @@ describe("ce-work unit workspace controller", () => {
     expect(ctl(runs, "cleanup", "--run-id", "run-tree", "--unit-id", "U2", "--abandon", "--expect-transport", transport.commit).word).toBe("CLEANED")
     expect(worktreePaths(linked)).not.toContain(path.resolve(workspace))
     expect(sh(linked, ["git", "rev-parse", "-q", "--verify", transport.ref], false).status).not.toBe(0)
+    expect(existsSync(path.join(runs, "run-tree", "jobs", job))).toBe(false)
+    expect(existsSync(path.join(runs, "run-tree", "units", "U2", "result"))).toBe(false)
+    expect(existsSync(path.join(runs, "run-tree", "units", "U2", "packet.md"))).toBe(false)
+    expect(existsSync(path.join(runs, "run-tree", "units", "U2", "authorization.json"))).toBe(false)
+    const compact = ctl(runs, "status", "--run-id", "run-tree", "--unit-id", "U2").body.unit
+    expect(compact.cleanup.artifact_cleanup.complete).toBe(true)
+    expect(compact.attempts[0].terminal_receipt).toMatchObject({
+      actual_route: "codex",
+      packet_digest: packetDigest("packet"),
+      terminal_status: "completed",
+      evidence_count: 1,
+    })
 
     expect(init(runs, "run-empty", f).word).toBe("READY")
-    ctl(runs, "prepare", "--run-id", "run-empty", "--unit-id", "empty", "--base", f.base, "--packet-digest", "empty-packet")
+    ctl(runs, "prepare", "--run-id", "run-empty", "--unit-id", "empty", "--base", f.base, "--packet", packetFile("empty-packet"))
     const emptyJob = fakeDoneJob(runs, "run-empty", "empty", "empty-packet")
     ctl(runs, "record-job", "--run-id", "run-empty", "--unit-id", "empty", "--attempt-id", "attempt-1", "--job-id", emptyJob)
     const empty = ctl(runs, "terminalize", "--run-id", "run-empty", "--unit-id", "empty").body.transport
@@ -243,7 +441,7 @@ describe("ce-work unit workspace controller", () => {
     const f = makeRepo()
     const runs = path.join(tmp("ce-work-runs-"), "ce-work")
     init(runs, "run-fold", f)
-    ctl(runs, "prepare", "--run-id", "run-fold", "--unit-id", "U", "--base", f.base, "--packet-digest", "packet")
+    ctl(runs, "prepare", "--run-id", "run-fold", "--unit-id", "U", "--base", f.base, "--packet", packetFile("packet"))
     const workspace = path.join(runs, "run-fold", "units", "U", "workspace")
     writeFileSync(path.join(workspace, "new.txt"), "new\n")
     const job = fakeDoneJob(runs, "run-fold", "U", "packet")
@@ -252,12 +450,21 @@ describe("ce-work unit workspace controller", () => {
     const lock = ctl(runs, "integration-acquire", "--run-id", "run-fold", "--unit-id", "U")
     expect(lock.word).toBe("ACQUIRED")
     const token = lock.body.lock_token
+    expect(ctl(runs, "integration-acquire", "--run-id", "run-fold", "--unit-id", "U").word).toBe("REFUSED")
+    const resumedLock = ctl(runs, "integration-acquire", "--run-id", "run-fold", "--unit-id", "U", "--resume")
+    expect(resumedLock.word).toBe("ACQUIRED")
+    expect(resumedLock.body).toMatchObject({ lock_token: token, resumed: true })
     expect(ctl(runs, "preflight", "--run-id", "run-fold", "--unit-id", "U", "--lock-token", token).word).toBe("PREFLIGHT_OK")
     git(f.repo, "cherry-pick", "--no-commit", t.commit)
     expect(existsSync(path.join(f.repo, "new.txt"))).toBe(true)
     expect(ctl(runs, "restore", "--run-id", "run-fold", "--unit-id", "U", "--lock-token", token).word).toBe("PRESERVED")
     expect(git(f.repo, "status", "--porcelain")).toBe("")
     expect(existsSync(path.join(f.repo, "new.txt"))).toBe(false)
+    expect(ctlWithEnv(
+      runs,
+      { CE_WORK_TEST_FAULT: "integration-release-after-unlink" },
+      "integration-release", "--run-id", "run-fold", "--unit-id", "U", "--lock-token", token,
+    ).word).toBe("INTERRUPTED")
     expect(ctl(runs, "integration-release", "--run-id", "run-fold", "--unit-id", "U", "--lock-token", token).word).toBe("RELEASED")
     expect(ctl(runs, "cleanup", "--run-id", "run-fold", "--unit-id", "U", "--abandon", "--expect-transport", t.commit).word).toBe("CLEANED")
     expect(sh(f.repo, ["git", "rev-parse", "-q", "--verify", t.ref], false).status).not.toBe(0)
@@ -271,7 +478,7 @@ describe("ce-work unit workspace controller", () => {
     for (const [position, unitId] of ["U-a", "U-b"].entries()) {
       ctl(
         runs, "prepare", "--run-id", "run-wave-collision", "--unit-id", unitId,
-        "--base", f.base, "--packet-digest", `packet-${unitId}`,
+        "--base", f.base, "--packet", packetFile(`packet-${unitId}`),
         "--wave-id", "wave-1", "--wave-position", String(position),
       )
       const workspace = path.join(runs, "run-wave-collision", "units", unitId, "workspace")
@@ -321,7 +528,7 @@ describe("ce-work unit workspace controller", () => {
     for (const [position, unitId] of ["U-a", "U-b"].entries()) {
       ctl(
         runs, "prepare", "--run-id", "run-wave-restore", "--unit-id", unitId,
-        "--base", f.base, "--packet-digest", `packet-${unitId}`,
+        "--base", f.base, "--packet", packetFile(`packet-${unitId}`),
         "--wave-id", "wave-1", "--wave-position", String(position),
       )
       const workspace = path.join(runs, "run-wave-restore", "units", unitId, "workspace")
@@ -404,10 +611,10 @@ describe("ce-work unit workspace controller", () => {
     const interrupted = ctlWithEnv(
       runs,
       { CE_WORK_TEST_FAULT: "after-worktree-add" },
-      "prepare", "--run-id", "run-crash", "--unit-id", "U", "--base", f.base, "--packet-digest", "packet",
+      "prepare", "--run-id", "run-crash", "--unit-id", "U", "--base", f.base, "--packet", packetFile("packet"),
     )
     expect(interrupted.word).toBe("INTERRUPTED")
-    const adopted = ctl(runs, "prepare", "--run-id", "run-crash", "--unit-id", "U", "--base", f.base, "--packet-digest", "packet")
+    const adopted = ctl(runs, "prepare", "--run-id", "run-crash", "--unit-id", "U", "--base", f.base, "--packet", packetFile("packet"))
     expect(adopted.word).toBe("PREPARED")
     const workspace = adopted.body.workspace
     writeFileSync(path.join(workspace, "crash.txt"), "survives\n")
@@ -458,7 +665,7 @@ describe("ce-work unit workspace controller", () => {
     const f = makeRepo()
     const runs = path.join(tmp("ce-work-runs-"), "ce-work")
     init(runs, "run-fallback", f)
-    ctl(runs, "prepare", "--run-id", "run-fallback", "--unit-id", "U", "--base", f.base, "--packet-digest", "packet")
+    ctl(runs, "prepare", "--run-id", "run-fallback", "--unit-id", "U", "--base", f.base, "--packet", packetFile("packet"))
     const job = fakeRunningJob(runs, "run-fallback", "U", "packet")
     ctl(runs, "record-job", "--run-id", "run-fallback", "--unit-id", "U", "--attempt-id", "attempt-1", "--job-id", job)
 
@@ -480,11 +687,33 @@ describe("ce-work unit workspace controller", () => {
     expect(again.body.start_native).toBe(false)
   })
 
+  test("adopts a metadata-only never-started job and authorizes fallback exactly once", () => {
+    const f = makeRepo()
+    const runs = path.join(tmp("ce-work-runs-"), "ce-work")
+    init(runs, "run-never-started", f)
+    ctl(runs, "prepare", "--run-id", "run-never-started", "--unit-id", "U", "--base", f.base, "--packet", packetFile("packet"))
+    const job = fakeRunningJob(runs, "run-never-started", "U", "packet", "job-metadata-only")
+    const jobDir = path.join(runs, "run-never-started", "jobs", job)
+    rmSync(path.join(jobDir, "pid"))
+    rmSync(path.join(jobDir, "out.log"))
+
+    const resumed = ctl(runs, "resume", "--run-id", "run-never-started")
+    expect(resumed.body.actions).toContainEqual({ unit_id: "U", action: "job-adopted", job_id: job })
+    expect(resumed.body.actions).toContainEqual({ unit_id: "U", action: "monitored", process_state: "never-started" })
+    expect(ctl(runs, "status", "--run-id", "run-never-started", "--unit-id", "U").body.unit.attempts[0].fallback).toMatchObject({
+      eligible: true,
+      reason: "never-started",
+      claimed: null,
+    })
+    expect(ctl(runs, "claim-fallback", "--run-id", "run-never-started", "--unit-id", "U", "--caller-mode", "headless").word).toBe("FALLBACK_AUTHORIZED")
+    expect(ctl(runs, "claim-fallback", "--run-id", "run-never-started", "--unit-id", "U", "--caller-mode", "headless").word).toBe("FALLBACK_ALREADY_AUTHORIZED")
+  })
+
   test("repeated job sync without new evidence does not rewrite durable state", () => {
     const f = makeRepo()
     const runs = path.join(tmp("ce-work-runs-"), "ce-work")
     init(runs, "run-sync", f)
-    ctl(runs, "prepare", "--run-id", "run-sync", "--unit-id", "U", "--base", f.base, "--packet-digest", "packet")
+    ctl(runs, "prepare", "--run-id", "run-sync", "--unit-id", "U", "--base", f.base, "--packet", packetFile("packet"))
     const job = fakeRunningJob(runs, "run-sync", "U", "packet")
     ctl(runs, "record-job", "--run-id", "run-sync", "--unit-id", "U", "--attempt-id", "attempt-1", "--job-id", job)
 
@@ -502,7 +731,7 @@ describe("ce-work unit workspace controller", () => {
     const f = makeRepo()
     const runs = path.join(tmp("ce-work-runs-"), "ce-work")
     init(runs, "run-reap", f)
-    ctl(runs, "prepare", "--run-id", "run-reap", "--unit-id", "U", "--base", f.base, "--packet-digest", "packet")
+    ctl(runs, "prepare", "--run-id", "run-reap", "--unit-id", "U", "--base", f.base, "--packet", packetFile("packet"))
     const job = fakeRunningJob(runs, "run-reap", "U", "packet")
     ctl(runs, "record-job", "--run-id", "run-reap", "--unit-id", "U", "--attempt-id", "attempt-1", "--job-id", job)
 
@@ -521,7 +750,7 @@ describe("ce-work unit workspace controller", () => {
     const f = makeRepo()
     const runs = path.join(tmp("ce-work-runs-"), "ce-work")
     initWithBinding(runs, "run-require", f, "require")
-    ctl(runs, "prepare", "--run-id", "run-require", "--unit-id", "U", "--base", f.base, "--packet-digest", "packet")
+    ctl(runs, "prepare", "--run-id", "run-require", "--unit-id", "U", "--base", f.base, "--packet", packetFile("packet"))
     const job = fakeRunningJob(runs, "run-require", "U", "packet")
     ctl(runs, "record-job", "--run-id", "run-require", "--unit-id", "U", "--attempt-id", "attempt-1", "--job-id", job)
     terminalizeFakeJob(runs, "run-require", job, "timeout")
@@ -538,7 +767,7 @@ describe("ce-work unit workspace controller", () => {
     const f = makeRepo()
     const runs = path.join(tmp("ce-work-runs-"), "ce-work")
     init(runs, "run-ambiguous", f)
-    ctl(runs, "prepare", "--run-id", "run-ambiguous", "--unit-id", "U", "--base", f.base, "--packet-digest", "packet")
+    ctl(runs, "prepare", "--run-id", "run-ambiguous", "--unit-id", "U", "--base", f.base, "--packet", packetFile("packet"))
     fakeDoneJob(runs, "run-ambiguous", "U", "packet", "job-a")
     fakeDoneJob(runs, "run-ambiguous", "U", "packet", "job-b")
     expect(ctl(runs, "resume", "--run-id", "run-ambiguous").word).toBe("AMBIGUOUS")
@@ -546,7 +775,7 @@ describe("ce-work unit workspace controller", () => {
     git(f.repo, "worktree", "remove", "--force", path.join(runs, "run-ambiguous", "units", "U", "workspace"))
 
     init(runs, "run-diverge", f)
-    ctl(runs, "prepare", "--run-id", "run-diverge", "--unit-id", "U", "--base", f.base, "--packet-digest", "packet")
+    ctl(runs, "prepare", "--run-id", "run-diverge", "--unit-id", "U", "--base", f.base, "--packet", packetFile("packet"))
     const workspace = path.join(runs, "run-diverge", "units", "U", "workspace")
     writeFileSync(path.join(workspace, "delegated.txt"), "delegate\n")
     const job = fakeDoneJob(runs, "run-diverge", "U", "packet")
@@ -569,7 +798,7 @@ describe("ce-work unit workspace controller", () => {
     const runs = path.join(tmp("ce-work-runs-"), "ce-work")
     const makeTransport = (runId: string, name: string) => {
       init(runs, runId, f)
-      ctl(runs, "prepare", "--run-id", runId, "--unit-id", "U", "--base", f.base, "--packet-digest", "packet")
+      ctl(runs, "prepare", "--run-id", runId, "--unit-id", "U", "--base", f.base, "--packet", packetFile("packet"))
       const workspace = path.join(runs, runId, "units", "U", "workspace")
       writeFileSync(path.join(workspace, name), `${runId}\n`)
       const job = fakeDoneJob(runs, runId, "U", "packet")
@@ -601,7 +830,7 @@ describe("ce-work unit workspace controller", () => {
     const f = makeRepo()
     const runs = path.join(tmp("ce-work-runs-"), "ce-work")
     init(runs, "run-restore", f)
-    ctl(runs, "prepare", "--run-id", "run-restore", "--unit-id", "U", "--base", f.base, "--packet-digest", "packet")
+    ctl(runs, "prepare", "--run-id", "run-restore", "--unit-id", "U", "--base", f.base, "--packet", packetFile("packet"))
     const workspace = path.join(runs, "run-restore", "units", "U", "workspace")
     writeFileSync(path.join(workspace, "new.txt"), "new\n")
     const job = fakeDoneJob(runs, "run-restore", "U", "packet")

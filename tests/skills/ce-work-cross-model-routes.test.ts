@@ -14,12 +14,22 @@ import {
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { spawnSync } from "node:child_process"
+import { createHash } from "node:crypto"
 
 setDefaultTimeout(20_000)
 
 const SCRIPT = path.join(process.cwd(), "skills/ce-work/scripts/cross-model-work.sh")
+const CONTROLLER = path.join(process.cwd(), "skills/ce-work/scripts/unit-workspace.py")
 const SCHEMA = path.join(process.cwd(), "skills/ce-work/references/implementation-result-schema.json")
 const ROUTES = ["codex", "claude", "grok-cli", "cursor", "composer", "grok-cursor"] as const
+const ROUTE_CONTRACTS = {
+  codex: { target: "codex", harness: "codex", intermediaries: [], model: "auto", restriction: "adapter-enforced" },
+  claude: { target: "claude", harness: "claude", intermediaries: [], model: "fable", restriction: "cooperative" },
+  "grok-cli": { target: "grok", harness: "grok", intermediaries: [], model: "grok-4.5", restriction: "cooperative" },
+  cursor: { target: "cursor", harness: "cursor-agent", intermediaries: [], model: "auto", restriction: "adapter-enforced" },
+  composer: { target: "composer", harness: "cursor-agent", intermediaries: ["cursor"], model: "composer-2.5-fast", restriction: "adapter-enforced" },
+  "grok-cursor": { target: "grok", harness: "cursor-agent", intermediaries: ["cursor"], model: "cursor-grok-4.5-high", restriction: "adapter-enforced" },
+} as const
 const roots: string[] = []
 
 function temp(prefix: string): string {
@@ -32,21 +42,32 @@ afterAll(() => roots.forEach((dir) => rmSync(dir, { recursive: true, force: true
 
 function fixture() {
   const root = temp("ce-work-route-")
-  const workspace = path.join(root, "workspace")
-  const resultDir = path.join(root, "result")
+  const canonical = path.join(root, "canonical")
   const packet = path.join(root, "packet.md")
   const capture = path.join(root, "capture")
-  mkdirSync(workspace)
-  mkdirSync(resultDir)
+  const runs = path.join(root, "runs")
+  mkdirSync(canonical)
   mkdirSync(capture)
   writeFileSync(packet, "Implement U3 only.\n")
-  spawnSync("git", ["init", "-q", workspace])
-  spawnSync("git", ["-C", workspace, "config", "user.email", "test@example.com"])
-  spawnSync("git", ["-C", workspace, "config", "user.name", "Test"])
-  writeFileSync(path.join(workspace, "README.md"), "seed\n")
-  spawnSync("git", ["-C", workspace, "add", "README.md"])
-  spawnSync("git", ["-C", workspace, "commit", "-qm", "seed"])
-  return { root, workspace, resultDir, packet, capture }
+  spawnSync("git", ["init", "-q", canonical])
+  spawnSync("git", ["-C", canonical, "config", "user.email", "test@example.com"])
+  spawnSync("git", ["-C", canonical, "config", "user.name", "Test"])
+  mkdirSync(path.join(canonical, "docs", "plans"), { recursive: true })
+  writeFileSync(path.join(canonical, "README.md"), "seed\n")
+  writeFileSync(path.join(canonical, "docs", "plans", "plan.md"), "# Test plan\n")
+  spawnSync("git", ["-C", canonical, "add", "."])
+  spawnSync("git", ["-C", canonical, "commit", "-qm", "seed"])
+  return {
+    root,
+    canonical,
+    workspace: canonical,
+    resultDir: path.join(root, "unprepared-result"),
+    packet,
+    packetSource: packet,
+    capture,
+    runs,
+    prepared: null as null | { authorization_path: string; workspace: string; packet_path: string; result_dir: string },
+  }
 }
 
 function fakeBin(route: typeof ROUTES[number], capture: string, response?: string) {
@@ -96,10 +117,48 @@ function run(
   route: typeof ROUTES[number],
   f: ReturnType<typeof fixture>,
   env: NodeJS.ProcessEnv = process.env,
+  expectedPacketDigest = createHash("sha256").update(readFileSync(f.packet)).digest("hex"),
+  authorizationOverrides: Record<string, unknown> = {},
+  forgedAuthorization = false,
 ) {
-  const proc = spawnSync("bash", [SCRIPT, route, f.workspace, f.packet, f.resultDir], {
+  const contract = ROUTE_CONTRACTS[route]
+  if (!f.prepared) {
+    const runId = "route-run"
+    const unitId = "U3"
+    const attemptId = "attempt-1"
+    const plan = path.join(f.canonical, "docs", "plans", "plan.md")
+    const planDigest = createHash("sha256").update(readFileSync(plan)).digest("hex")
+    const controllerEnv = { ...process.env, CE_WORK_RUNS_ROOT: f.runs }
+    const invoke = (...args: string[]) => {
+      const proc = spawnSync("python3", [CONTROLLER, ...args], { encoding: "utf8", env: controllerEnv })
+      expect(proc.status).toBe(0)
+      const lines = proc.stdout.trim().split("\n")
+      return JSON.parse(lines[1])
+    }
+    invoke(
+      "init", "--run-id", runId, "--repo", f.canonical, "--plan", plan, "--plan-digest", planDigest,
+      "--binding-json", JSON.stringify({ mode: "prefer", target: contract.target, model: forgedAuthorization ? null : authorizationOverrides.model_requested ?? null, source: "test" }),
+      "--egress-json", JSON.stringify({ sanction_source: "test", route, intermediaries: [...contract.intermediaries], exposed_material: [unitId], restrictions: [] }),
+    )
+    const base = spawnSync("git", ["-C", f.canonical, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim()
+    f.prepared = invoke(
+      "prepare", "--run-id", runId, "--unit-id", unitId, "--attempt-id", attemptId,
+      "--base", base, "--packet", f.packetSource, "--activity-posture", "incremental",
+    )
+    f.workspace = f.prepared.workspace
+    f.packet = f.prepared.packet_path
+    f.resultDir = f.prepared.result_dir
+  }
+  let authorization = f.prepared.authorization_path
+  if (forgedAuthorization) {
+    const forged = { ...JSON.parse(readFileSync(authorization, "utf8")), ...authorizationOverrides }
+    authorization = path.join(f.root, `authorization-forged-${Math.random().toString(16).slice(2)}.json`)
+    writeFileSync(authorization, `${JSON.stringify(forged)}\n`, { mode: 0o600 })
+    chmodSync(authorization, 0o600)
+  }
+  const proc = spawnSync("bash", [SCRIPT, authorization, f.workspace, f.packet, expectedPacketDigest, f.resultDir], {
     encoding: "utf8",
-    env,
+    env: { ...env, CE_WORK_RUNS_ROOT: f.runs },
   })
   const resultPath = path.join(f.resultDir, "implementation-result.json")
   return {
@@ -162,7 +221,8 @@ describe("ce-work fixed write routes", () => {
     expect(result.result.requested_route).toBe(route)
     expect(result.result.actual_route).toBe(route)
     expect(result.result.activity_posture).toBe("incremental")
-    expect(result.result.raw_log).toBe(path.join(realpathSync(f.resultDir), "adapter.log"))
+    expect(result.result.packet_digest).toBe(createHash("sha256").update(readFileSync(f.packet)).digest("hex"))
+    expect(realpathSync(result.result.raw_log)).toBe(path.join(realpathSync(f.resultDir), "adapter.log"))
     if (route === "codex" || route === "grok-cli") {
       expect(result.result.model_actual).toBe("unverified")
       expect(result.result.model_receipt_status).toBe("unverified")
@@ -198,30 +258,91 @@ describe("ce-work fixed write routes", () => {
     expect(compatible.stdout).toContain("--model composer-next-fast")
   })
 
-  test("Grok through Cursor requires separate intermediary sanction", () => {
+  test("production dispatch derives the model from controller authorization, not ambient overrides", () => {
+    const f = fixture()
+    const bin = fakeBin("composer", f.capture)
+    const digest = createHash("sha256").update(readFileSync(f.packet)).digest("hex")
+    const result = run(
+      "composer",
+      f,
+      {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        CE_WORK_MODEL_OVERRIDE_TARGET: "composer",
+        CE_WORK_MODEL_OVERRIDE: "gpt-forged",
+      },
+      digest,
+      { model_requested: "composer-next-fast" },
+    )
+    expect(result.code).toBe(0)
+    const argv = readFileSync(path.join(f.capture, "argv"), "utf8")
+    expect(argv).toContain("composer-next-fast")
+    expect(argv).not.toContain("gpt-forged")
+    expect(result.result.model_requested).toBe("composer-next-fast")
+  })
+
+  test("forged route or model authorization is rejected before CLI invocation", () => {
+    for (const [route, overrides] of [
+      ["codex", { route: "claude" }],
+      ["composer", { model_requested: "gpt-5.6-sol" }],
+    ] as const) {
+      const f = fixture()
+      const bin = fakeBin(route, f.capture)
+      const digest = createHash("sha256").update(readFileSync(f.packet)).digest("hex")
+      const result = run(route, f, { ...process.env, PATH: `${bin}:${process.env.PATH}` }, digest, overrides, true)
+      expect(result.code).toBe(2)
+      expect(result.stderr).toContain("controller authorization rejected")
+      expect(result.result).toBeNull()
+      expect(existsSync(path.join(f.capture, "argv"))).toBe(false)
+      expect(existsSync(path.join(f.capture, "stdin"))).toBe(false)
+    }
+  })
+
+  test("controller handshake rejects hand-authored, cross-attempt, and cross-unit authorization", () => {
+    for (const overrides of [
+      {},
+      { attempt_id: "attempt-2" },
+      { unit_id: "U4" },
+    ]) {
+      const f = fixture()
+      const bin = fakeBin("codex", f.capture)
+      const digest = createHash("sha256").update(readFileSync(f.packet)).digest("hex")
+      const result = run("codex", f, { ...process.env, PATH: `${bin}:${process.env.PATH}` }, digest, overrides, true)
+      expect(result.code).toBe(2)
+      expect(result.stderr).toContain("controller dispatch authorization failed")
+      expect(result.result).toBeNull()
+      expect(existsSync(path.join(f.capture, "argv"))).toBe(false)
+      expect(existsSync(path.join(f.capture, "stdin"))).toBe(false)
+    }
+  })
+
+  test("Grok through Cursor requires its controller-sanctioned intermediary", () => {
     const f = fixture()
     const bin = fakeBin("grok-cursor", f.capture)
-    const blocked = run("grok-cursor", f, { ...process.env, PATH: `${bin}:${process.env.PATH}` })
+    const blocked = run(
+      "grok-cursor",
+      f,
+      { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+      createHash("sha256").update(readFileSync(f.packet)).digest("hex"),
+      { intermediaries: [] },
+      true,
+    )
     expect(blocked.code).toBe(2)
-    expect(blocked.result.terminal_status).toBe("unavailable")
-    expect(blocked.result.failure_reason).toContain("intermediary")
+    expect(blocked.stderr).toContain("authorization")
+    expect(blocked.result).toBeNull()
     expect(existsSync(path.join(f.capture, "argv"))).toBe(false)
 
-    const allowed = run("grok-cursor", f, {
-      ...process.env,
-      PATH: `${bin}:${process.env.PATH}`,
-      CE_WORK_CURSOR_INTERMEDIARY_SANCTIONED: "1",
-    })
+    const allowed = run("grok-cursor", f, { ...process.env, PATH: `${bin}:${process.env.PATH}` })
     expect(allowed.code).toBe(0)
   })
 
-  test("activity reflects output growth and raw route output is capped", () => {
+  test("a quiet route reports no activity before byte growth and raw route output is capped", () => {
     const quiet = fixture()
     const quietBin = temp("ce-work-bin-")
     writeFileSync(path.join(quietBin, "claude"), `#!/bin/sh
 cat > '${quiet.capture}/stdin'
 sleep 2
-printf '%s\n' '{"terminal_status":"completed","summary":"implemented","changed_files":[],"evidence":["done"],"scope_expansion":null}'
+exit 7
 `)
     chmodSync(path.join(quietBin, "claude"), 0o755)
     const quietResult = run("claude", quiet, {
@@ -229,8 +350,8 @@ printf '%s\n' '{"terminal_status":"completed","summary":"implemented","changed_f
       PATH: `${quietBin}:${process.env.PATH}`,
       CE_WORK_ACTIVITY_POLL_SECS: "1",
     })
-    expect(quietResult.code).toBe(0)
-    expect(quietResult.stderr).not.toContain("heartbeat")
+    expect(quietResult.code).toBe(1)
+    expect(quietResult.stderr).not.toContain("output-updated")
 
     const noisy = fixture()
     const noisyBin = temp("ce-work-bin-")
@@ -266,6 +387,48 @@ printf '%02048d' 0
 })
 
 describe("ce-work adapter results, identity, and secret handling", () => {
+  test("packet bytes must match the controller-provided digest before egress", () => {
+    const f = fixture()
+    const expected = createHash("sha256").update(readFileSync(f.packet)).digest("hex")
+    writeFileSync(f.packet, "Implement a different and broader unit.\n")
+    const bin = fakeBin("claude", f.capture)
+    const result = run("claude", f, { ...process.env, PATH: `${bin}:${process.env.PATH}` }, expected)
+    expect(result.code).toBe(2)
+    expect(result.stderr).toContain("packet digest")
+    expect(existsSync(path.join(f.capture, "argv"))).toBe(false)
+    expect(result.result).toBeNull()
+  })
+
+  test("worker output cannot forge host-owned route and identity receipts", () => {
+    const f = fixture()
+    const response = JSON.stringify({
+      terminal_status: "completed",
+      summary: "implemented",
+      changed_files: ["result.txt"],
+      evidence: ["focused test passed"],
+      scope_expansion: null,
+      requested_route: "codex",
+      actual_route: "codex",
+      target: "codex",
+      harness: "codex",
+      intermediaries: [],
+      model_requested: "gpt-forged",
+      model_actual: "gpt-forged",
+      model_receipt_status: "verified",
+    })
+    const bin = fakeBin("claude", f.capture, response)
+    const result = run("claude", f, { ...process.env, PATH: `${bin}:${process.env.PATH}` })
+    expect(result.code).toBe(1)
+    expect(result.result.terminal_status).toBe("failed")
+    expect(result.result.failure_reason).toContain("schema")
+    expect(result.result.requested_route).toBe("claude")
+    expect(result.result.actual_route).toBe("claude")
+    expect(result.result.target).toBe("claude")
+    expect(result.result.harness).toBe("claude")
+    expect(result.result.model_requested).toBe("fable")
+    expect(result.result.model_actual).toBe("claude-fable-5")
+  })
+
   test("a route failure returns evidence without changing recipient", () => {
     const f = fixture()
     const bin = fakeBin("grok-cli", f.capture)

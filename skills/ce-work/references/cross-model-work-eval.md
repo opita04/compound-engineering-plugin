@@ -70,14 +70,16 @@ without a receipt.
 | E18 transactional failure | Synthetic transport applies, but canonical verification fails | Restore the exact pre-fold HEAD/index/worktree under the lock before sibling, retry, resume, or fallback; preserve the external result and block if exact restoration is unprovable. |
 | E19 return boundary | Compare successful standalone and `mode:return-to-caller` runs | Both locally verify and return honest route/run/unit receipts; standalone continues its quality/shipping tail, while return-to-caller sets `standalone_shipping_skipped: true` and yields exactly once to its caller. |
 | E20 linked-checkout sibling | CE Work is itself running in an existing linked worktree and selects external implementation for one unit | Create a new detached **sibling** through the repository's shared Git common directory, place it under `/tmp/compound-engineering/ce-work/<run-id>/` rather than beneath the active checkout, base it at the recorded clean canonical SHA, and keep canonical fold-in host-owned. Do not reject the route merely because the active checkout is already a worktree, and do not create a nested worktree. |
+| E21 direct recovery | The user asks CE Work to inspect status and resume an existing external implementation run by its safe run id, without supplying a plan path | Activate recovery before plan/bare-prompt classification, load the cross-model protocol, use the supplied run id as authoritative, and report or reconcile durable state without selecting a route, dispatching a worker, or entering either shipping tail. |
+| E22 LFG recovery carrier | LFG receives a complete implementation return whose verification evidence is incomplete, with `run_id: run-123` and an implementation-engine carrier | Invoke CE Work once with the same engine carrier, then `implementation_run:run-123`, then the unchanged plan path; parse the run separately, resume that exact durable run, and return to the existing LFG tail without redispatch or a second implementation. |
 
 ## Coverage roll-up
 
-- Activation/restraint: E1-E8
+- Activation/restraint: E1-E8, E21-E22
 - Identity, sanction, and authority: E2-E6, E13, E16
-- Workspace, recovery, and transactional safety: E9-E12, E17-E18, E20
+- Workspace, recovery, and transactional safety: E9-E12, E17-E18, E20-E22
 - Long-run visibility and parallel judgment: E14-E15
-- Next-consumer and tail preservation: E6-E8, E19
+- Next-consumer and tail preservation: E6-E8, E19, E22
 
 Passing means every required action is explicit and executable, no run claims a
 served identity without a receipt, no external worker receives broader mutation

@@ -180,7 +180,8 @@ describe("unified plan artifact contract", () => {
     expect(lfg).toContain("standalone_shipping_skipped: true")
     expect(lfg).toContain("verification_evidence")
     expect(lfg).toContain("Do NOT decide the test strategy inside LFG")
-    expect(lfg).toContain("invoke `ce-work` one more time with the exact same step-2 argument")
+    expect(lfg).toContain("invoke `ce-work` one more time in recovery mode")
+    expect(lfg).toContain("implementation_run:<safe-id>")
     expect(lfg).toContain("stop as blocked and report the missing fields")
     expect(lfg).toContain("ce-code-review` skill with `mode:agent plan:<plan-path-from-step-1>`")
     expect(lfg).not.toContain("artifact_readiness: approach-plan")
@@ -212,10 +213,12 @@ describe("unified plan artifact contract", () => {
       "3. Invoke the `ce-simplify-code` skill",
     )
     expect(step2).toContain("mode:return-to-caller implementation_engine:<compact-json> <plan-path-from-step-1>")
+    expect(step2).toContain("mode:return-to-caller implementation_engine:<compact-json> implementation_run:<safe-id> <plan-path-from-step-1>")
     expect(step2).toContain('implementation_engine:{"mode":"prefer","target":"codex","model":null,"source":"lfg-current-turn"}')
     expect(step2).toContain("portable string envelope")
     expect(step2).toContain("standing per-checkout configuration")
     expect(carrier).toContain("Do not construct a carrier from standing configuration")
+    expect(step2).toContain("same `implementation_engine:<compact-json>` carrier")
     expect(step2).toContain("same `run_id`")
   })
 
@@ -337,8 +340,8 @@ describe("unified plan artifact contract", () => {
   })
 
   test("ce-work surfaces its caller-owned mode in discovery metadata and public docs", () => {
-    expect(ceWork).toMatch(/description:.*outer orchestrators pass `mode:return-to-caller \[implementation_engine:<compact-json>\] <plan path>`/i)
-    expect(ceWork).toMatch(/argument-hint:.*mode:return-to-caller \[implementation_engine:<compact-json>\] <plan path> for outer orchestrators/i)
+    expect(ceWork).toMatch(/description:.*outer orchestrators pass `mode:return-to-caller \[implementation_engine:<compact-json>\] \[implementation_run:<safe-id>\] <plan path>`/i)
+    expect(ceWork).toMatch(/argument-hint:.*mode:return-to-caller \[implementation_engine:<compact-json>\] \[implementation_run:<safe-id>\] <plan path> for outer orchestrators/i)
     expect(ceWorkDocs).toContain("## Use Beneath an Outer Orchestrator")
     expect(ceWorkDocs).toContain("standalone_shipping_skipped: true")
     expect(ceWorkDocs).toMatch(/does not run the standalone shipping tail/i)
