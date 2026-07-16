@@ -43,8 +43,9 @@ section() { echo ""; echo " $1"; }
 # intentionally not a general YAML parser: comments and absent/empty keys are
 # ignored, surrounding quotes are removed, and values are never evaluated.
 read_flat_config_value() {
-  config_file="$1"
-  config_key="$2"
+  local config_file="$1"
+  local config_key="$2"
+  local value
   value=$(awk -v key="$config_key" '
     $0 ~ "^" key "[[:space:]]*:" {
       sub("^" key "[[:space:]]*:[[:space:]]*", "")

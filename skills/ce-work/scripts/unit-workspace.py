@@ -246,7 +246,7 @@ def locked_manifest(run_id: str, write: bool = False):
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode) or (_euid() is not None and st.st_uid != _euid()) or _mode(st) != 0o600:
             raise TrustFailure("manifest lock owner/type/mode validation failed")
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        fcntl.flock(fd, fcntl.LOCK_EX if write else fcntl.LOCK_SH)
         doc = read_private_json(os.path.join(rd, "manifest.json"))
         if doc.get("schema_version") != SCHEMA_VERSION or doc.get("run_id") != run_id:
             raise TrustFailure("manifest schema or run identity mismatch")
@@ -662,6 +662,8 @@ def sync_job(run_id: str, unit_id: str) -> dict:
     with locked_manifest(run_id, write=True) as doc:
         attempt = find_attempt(doc["units"][unit_id])
         prior_state = attempt.get("process_state")
+        prior_activity = dict(attempt["activity"])
+        prior_fallback = dict(attempt.get("fallback", {}))
         attempt["process_state"] = evidence["process_state"]
         attempt["activity"].update(evidence["activity"])
         if evidence["process_state"] in TERMINAL_PROCESS - {"done"}:
@@ -669,10 +671,17 @@ def sync_job(run_id: str, unit_id: str) -> dict:
             fallback.setdefault("claimed", None)
             fallback["eligible"] = fallback.get("claimed") is None
             fallback["reason"] = evidence["process_state"]
-        event(doc, "job-synced", unit_id, {"process_state": evidence["process_state"]})
-        if prior_state != evidence["process_state"] and evidence["process_state"] in TERMINAL_PROCESS:
-            event(doc, "job-terminal", unit_id, {"process_state": evidence["process_state"]})
-    return {"process_state": evidence["process_state"], "activity": attempt["activity"]}
+        changed = (
+            prior_state != evidence["process_state"]
+            or prior_activity != attempt["activity"]
+            or prior_fallback != attempt.get("fallback", {})
+        )
+        if changed:
+            event(doc, "job-synced", unit_id, {"process_state": evidence["process_state"]})
+            if prior_state != evidence["process_state"] and evidence["process_state"] in TERMINAL_PROCESS:
+                event(doc, "job-terminal", unit_id, {"process_state": evidence["process_state"]})
+        activity = dict(attempt["activity"])
+    return {"process_state": evidence["process_state"], "activity": activity}
 
 
 def cmd_sync_job(args) -> tuple[str, dict]:
@@ -1232,24 +1241,33 @@ def resolve_resume_run(args) -> str:
     return run_id
 
 
+def resume_monitor(run_id: str, unit_id: str) -> list[dict]:
+    evidence = sync_job(run_id, unit_id)
+    actions = [{"unit_id": unit_id, "action": "monitored", "process_state": evidence["process_state"]}]
+    if evidence["process_state"] == "done":
+        transport = terminalize(run_id, unit_id)
+        actions.append({"unit_id": unit_id, "action": "terminalized", "transport": transport["commit"]})
+    return actions
+
+
 def cmd_resume(args) -> tuple[str, dict]:
-    args.run_id = resolve_resume_run(args)
+    run_id = resolve_resume_run(args)
     actions: list[dict] = []
-    with locked_manifest(args.run_id) as doc:
+    with locked_manifest(run_id) as doc:
         validate_repo(doc)
         unit_ids = list(doc["units"])
     for uid in unit_ids:
-        with locked_manifest(args.run_id) as doc:
+        with locked_manifest(run_id) as doc:
             unit = doc["units"][uid]
             state = unit["state"]
             attempt = find_attempt(unit)
             lock = doc.get("integration_lock")
         if state == "queued" and not attempt.get("job_id"):
-            matches = matching_runner_jobs(args.run_id, unit)
+            matches = matching_runner_jobs(run_id, unit)
             if len(matches) > 1:
                 raise Operational("AMBIGUOUS", f"multiple runner jobs match queued unit {uid}")
             if len(matches) == 1:
-                with locked_manifest(args.run_id, write=True) as current:
+                with locked_manifest(run_id, write=True) as current:
                     current_unit = current["units"][uid]
                     current_attempt = find_attempt(current_unit)
                     if current_attempt.get("job_id") not in (None, matches[0]):
@@ -1258,22 +1276,14 @@ def cmd_resume(args) -> tuple[str, dict]:
                     current_unit["state"] = "authoring"
                     event(current, "job-adopted", uid, {"job_id": matches[0]})
                 actions.append({"unit_id": uid, "action": "job-adopted", "job_id": matches[0]})
-                evidence = sync_job(args.run_id, uid)
-                actions.append({"unit_id": uid, "action": "monitored", "process_state": evidence["process_state"]})
-                if evidence["process_state"] == "done":
-                    transport = terminalize(args.run_id, uid)
-                    actions.append({"unit_id": uid, "action": "terminalized", "transport": transport["commit"]})
+                actions.extend(resume_monitor(run_id, uid))
         elif state == "authoring" and attempt.get("job_id"):
-            evidence = sync_job(args.run_id, uid)
-            actions.append({"unit_id": uid, "action": "monitored", "process_state": evidence["process_state"]})
-            if evidence["process_state"] == "done":
-                transport = terminalize(args.run_id, uid)
-                actions.append({"unit_id": uid, "action": "terminalized", "transport": transport["commit"]})
+            actions.extend(resume_monitor(run_id, uid))
         elif state == "authored":
-            transport = terminalize(args.run_id, uid)
+            transport = terminalize(run_id, uid)
             actions.append({"unit_id": uid, "action": "terminalized", "transport": transport["commit"]})
         elif state == "restoring" and lock and lock.get("unit_id") == uid:
-            exact = restore(args.run_id, uid, lock["nonce"])
+            exact = restore(run_id, uid, lock["nonce"])
             actions.append({"unit_id": uid, "action": "restored" if exact else "blocked"})
         elif state == "integration-pending" and unit["integration"].get("pre_fold") and lock and lock.get("unit_id") == uid:
             validate_lock(doc, uid, lock["nonce"])
@@ -1282,7 +1292,7 @@ def cmd_resume(args) -> tuple[str, dict]:
             if snap != unit["integration"]["pre_fold"]:
                 if not matches_expected_apply(repo, unit, snap):
                     raise Operational("BLOCKED", "canonical dirt does not match the expected in-flight transport; preserved for recovery")
-                with locked_manifest(args.run_id, write=True) as current:
+                with locked_manifest(run_id, write=True) as current:
                     current_unit = current["units"][uid]
                     current_unit["state"] = "integrated"
                     current_unit["integration"]["applied"] = {
@@ -1295,15 +1305,15 @@ def cmd_resume(args) -> tuple[str, dict]:
                 actions.append({"unit_id": uid, "action": "apply-reconciled"})
         elif state == "verified" and lock and lock.get("unit_id") == uid:
             validate_lock(doc, uid, lock["nonce"])
-            with locked_manifest(args.run_id) as current:
+            with locked_manifest(run_id) as current:
                 commit = reconcile_commit(current, current["units"][uid])
             if commit:
-                with locked_manifest(args.run_id, write=True) as current:
+                with locked_manifest(run_id, write=True) as current:
                     current["units"][uid]["integration"]["canonical_commit"] = commit
                     current["units"][uid]["state"] = "committed"
                     event(current, "canonical-commit-reconciled", uid, {"commit": commit["commit"]})
                 actions.append({"unit_id": uid, "action": "commit-reconciled", "commit": commit["commit"]})
-    return "RESUMED", {"run_id": args.run_id, "actions": actions, "redispatched": False, "applied": False}
+    return "RESUMED", {"run_id": run_id, "actions": actions, "redispatched": False, "applied": False}
 
 
 def fallback_basis(doc: dict, unit: dict) -> tuple[str, dict]:

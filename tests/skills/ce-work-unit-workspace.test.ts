@@ -480,6 +480,24 @@ describe("ce-work unit workspace controller", () => {
     expect(again.body.start_native).toBe(false)
   })
 
+  test("repeated job sync without new evidence does not rewrite durable state", () => {
+    const f = makeRepo()
+    const runs = path.join(tmp("ce-work-runs-"), "ce-work")
+    init(runs, "run-sync", f)
+    ctl(runs, "prepare", "--run-id", "run-sync", "--unit-id", "U", "--base", f.base, "--packet-digest", "packet")
+    const job = fakeRunningJob(runs, "run-sync", "U", "packet")
+    ctl(runs, "record-job", "--run-id", "run-sync", "--unit-id", "U", "--attempt-id", "attempt-1", "--job-id", job)
+
+    expect(ctl(runs, "sync-job", "--run-id", "run-sync", "--unit-id", "U").word).toBe("SYNCED")
+    const manifestPath = path.join(runs, "run-sync", "manifest.json")
+    const first = JSON.parse(readFileSync(manifestPath, "utf8"))
+    expect(ctl(runs, "sync-job", "--run-id", "run-sync", "--unit-id", "U").word).toBe("SYNCED")
+    const second = JSON.parse(readFileSync(manifestPath, "utf8"))
+
+    expect(second.revision).toBe(first.revision)
+    expect(second.events).toEqual(first.events)
+  })
+
   test("explicit reap records authoritative termination before fallback", () => {
     const f = makeRepo()
     const runs = path.join(tmp("ce-work-runs-"), "ce-work")

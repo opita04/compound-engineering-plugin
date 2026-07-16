@@ -152,7 +152,7 @@ PROMPT_FILE="$SCRATCH/prompt.md"
 RAW_STDOUT="$SCRATCH/stdout.log"
 RAW_STDERR="$SCRATCH/stderr.log"
 RAW_RESULT="$SCRATCH/result.raw"
-COMBINED_RAW="$SCRATCH/combined.raw"
+RAW_LIMIT_MARKER="$SCRATCH/raw-output-limit"
 RESULT_FILE="$RESULT_DIR/implementation-result.json"
 LOG_FILE="$RESULT_DIR/adapter.log"
 trap 'rm -rf "$SCRATCH"' EXIT
@@ -258,6 +258,20 @@ esac
 ACTIVITY_POLL_SECS="${CE_WORK_ACTIVITY_POLL_SECS:-15}"
 case "$ACTIVITY_POLL_SECS" in ''|*[!0-9]*) ACTIVITY_POLL_SECS=15 ;; esac
 [ "$ACTIVITY_POLL_SECS" -lt 1 ] && ACTIVITY_POLL_SECS=1
+MAX_RAW_BYTES="${CE_WORK_MAX_RAW_BYTES:-10485760}"
+case "$MAX_RAW_BYTES" in ''|*[!0-9]*) MAX_RAW_BYTES=10485760 ;; esac
+[ "$MAX_RAW_BYTES" -lt 1 ] && MAX_RAW_BYTES=10485760
+
+raw_byte_count() {
+  local total=0 bytes file
+  for file in "$RAW_STDOUT" "$RAW_STDERR" "$RAW_RESULT"; do
+    [ -f "$file" ] || continue
+    bytes="$(wc -c < "$file" | tr -d '[:space:]')"
+    case "$bytes" in ''|*[!0-9]*) bytes=0 ;; esac
+    total=$((total + bytes))
+  done
+  printf '%s' "$total"
+}
 
 ACTIVE_ROUTE_PID=""
 ACTIVITY_PID=""
@@ -276,12 +290,16 @@ ACTIVE_ROUTE_PID=$!
 (
   previous=""
   while kill -0 "$ACTIVE_ROUTE_PID" 2>/dev/null; do
-    current="$(wc -c "$RAW_STDOUT" "$RAW_STDERR" "$RAW_RESULT" 2>/dev/null | tail -n 1 | tr -d '[:space:]')"
+    current="$(raw_byte_count)"
+    if [ "$current" -gt "$MAX_RAW_BYTES" ]; then
+      : > "$RAW_LIMIT_MARKER"
+      log "activity route=$ROUTE raw-output-limit bytes=$current cap=$MAX_RAW_BYTES"
+      kill -TERM "$ACTIVE_ROUTE_PID" 2>/dev/null || true
+      break
+    fi
     if [ "$current" != "$previous" ]; then
       log "activity route=$ROUTE output-updated"
       previous="$current"
-    else
-      log "activity route=$ROUTE heartbeat"
     fi
     sleep "$ACTIVITY_POLL_SECS"
   done
@@ -293,13 +311,19 @@ kill "$ACTIVITY_PID" 2>/dev/null || true
 wait "$ACTIVITY_PID" 2>/dev/null || true
 ACTIVE_ROUTE_PID=""
 ACTIVITY_PID=""
+RAW_BYTES="$(raw_byte_count)"
+[ "$RAW_BYTES" -gt "$MAX_RAW_BYTES" ] && : > "$RAW_LIMIT_MARKER"
 {
   cat "$RAW_STDOUT"
   cat "$RAW_STDERR"
   [ -f "$RAW_RESULT" ] && cat "$RAW_RESULT"
-} > "$COMBINED_RAW"
-redact_stream < "$COMBINED_RAW" > "$LOG_FILE"
+} | head -c "$MAX_RAW_BYTES" | redact_stream > "$LOG_FILE"
 chmod 600 "$LOG_FILE"
+
+if [ -f "$RAW_LIMIT_MARKER" ]; then
+  publish_unavailable "fixed route raw output exceeded ${MAX_RAW_BYTES} bytes"
+  exit 1
+fi
 
 if [ "$ROUTE_EXIT" -ne 0 ]; then
   publish_unavailable "fixed route exited with exit $ROUTE_EXIT"
@@ -369,8 +393,11 @@ if valid:
         or (worker["terminal_status"]!="scope_expansion" and worker.get("scope_expansion") is None)))
 
 served="unverified"
-try: stream_text=open(stream, encoding="utf-8", errors="replace").read()
-except OSError: stream_text=""
+if source == stream:
+    stream_text=raw
+else:
+    try: stream_text=open(stream, encoding="utf-8", errors="replace").read()
+    except OSError: stream_text=""
 for line in stream_text.splitlines():
     try: event=json.loads(line)
     except Exception: continue

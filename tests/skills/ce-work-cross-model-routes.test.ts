@@ -215,6 +215,41 @@ describe("ce-work fixed write routes", () => {
     expect(allowed.code).toBe(0)
   })
 
+  test("activity reflects output growth and raw route output is capped", () => {
+    const quiet = fixture()
+    const quietBin = temp("ce-work-bin-")
+    writeFileSync(path.join(quietBin, "claude"), `#!/bin/sh
+cat > '${quiet.capture}/stdin'
+sleep 2
+printf '%s\n' '{"terminal_status":"completed","summary":"implemented","changed_files":[],"evidence":["done"],"scope_expansion":null}'
+`)
+    chmodSync(path.join(quietBin, "claude"), 0o755)
+    const quietResult = run("claude", quiet, {
+      ...process.env,
+      PATH: `${quietBin}:${process.env.PATH}`,
+      CE_WORK_ACTIVITY_POLL_SECS: "1",
+    })
+    expect(quietResult.code).toBe(0)
+    expect(quietResult.stderr).not.toContain("heartbeat")
+
+    const noisy = fixture()
+    const noisyBin = temp("ce-work-bin-")
+    writeFileSync(path.join(noisyBin, "claude"), `#!/bin/sh
+cat > '${noisy.capture}/stdin'
+printf '%02048d' 0
+`)
+    chmodSync(path.join(noisyBin, "claude"), 0o755)
+    const noisyResult = run("claude", noisy, {
+      ...process.env,
+      PATH: `${noisyBin}:${process.env.PATH}`,
+      CE_WORK_MAX_RAW_BYTES: "256",
+    })
+    expect(noisyResult.code).toBe(1)
+    expect(noisyResult.result.terminal_status).toBe("unavailable")
+    expect(noisyResult.result.failure_reason).toContain("exceeded 256 bytes")
+    expect(statSync(path.join(noisy.resultDir, "adapter.log")).size).toBeLessThanOrEqual(256)
+  })
+
   test.each(["claude", "grok-cli"] as const)("%s is unavailable when enforceable confinement is required", (route) => {
     const f = fixture()
     const bin = fakeBin(route, f.capture)
