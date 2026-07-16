@@ -81,7 +81,14 @@ When no `why_it_matters` is available for a finding (rare — only if persona ou
 
 ## Question and options
 
-After the preview body is rendered, ask the user using the platform's blocking question tool (`AskUserQuestion` in Claude Code, `request_user_input` in Codex, `ask_question` in Antigravity CLI (`agy`), `ask_user` in Pi (requires the `pi-ask-user` extension)). In Claude Code, the tool should already be loaded from the Interactive-mode pre-load step — if it isn't, call `ToolSearch` with query `select:AskUserQuestion` now. The text fallback below applies only when the harness genuinely lacks a blocking tool — `ToolSearch` returns no match, the tool call explicitly fails, or the runtime mode does not expose it (e.g., Codex edit modes without `request_user_input`). A pending schema load is not a fallback trigger. Never silently skip the question.
+Treat the preview and its confirmation as two ordered user-facing events:
+
+1. **Preview event** — emit the complete preview body as user-visible assistant text in the conversation. Content composed only in hidden thinking or reasoning does not count. Do not place the preview only inside the question interface's input.
+2. **Decision event** — after the preview event is visible, invoke the harness's agent-callable blocking-question capability and wait for the answer. Success means the user can see the preview while choosing `Proceed` or `Cancel`, and the workflow does not continue until they answer.
+
+If the preview event has not occurred, do not invoke the blocking-question capability. If the harness exposes no such capability or the call errors, preserve the same interaction as visible chat: put the numbered `Proceed` / `Cancel` options immediately below the visible preview and wait for the user's reply. Never omit the preview or continue silently.
+
+**Non-exhaustive adapters:** `AskUserQuestion` in Claude Code, `request_user_input` in Codex, `ask_question` in Antigravity CLI (`agy`), and `ask_user` in Pi with the `pi-ask-user` extension. In Claude Code, `AskUserQuestion` should already be loaded from the Interactive-mode pre-load step; if it is not, call `ToolSearch` with query `select:AskUserQuestion` now. A pending schema load is not a fallback trigger.
 
 Stem (adapted to the path):
 
@@ -93,8 +100,6 @@ Options (exactly two, in all three cases):
 
 - `Proceed` — execute the plan as shown
 - `Cancel` — do nothing, return to the originating question
-
-Only when `ToolSearch` explicitly returns no match or the tool call errors — or on a platform with no blocking question tool — fall back to presenting numbered options and waiting for the user's next reply.
 
 ---
 
