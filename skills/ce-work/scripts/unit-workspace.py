@@ -877,6 +877,56 @@ def matches_expected_apply(repo: str, unit: dict, snap: dict | None = None) -> b
     )
 
 
+def wave_members(doc: dict, unit: dict) -> list[dict]:
+    wave = unit.get("wave", {})
+    wave_id = wave.get("id")
+    if not wave_id:
+        return []
+    base = wave.get("base")
+    members = [
+        candidate for candidate in doc.get("units", {}).values()
+        if candidate.get("wave", {}).get("id") == wave_id
+    ]
+    positions = [candidate.get("wave", {}).get("position") for candidate in members]
+    if any(candidate.get("wave", {}).get("base") != base for candidate in members):
+        raise Operational("BLOCKED", "wave members do not share one recorded base")
+    if len(set(positions)) != len(positions):
+        raise Operational("BLOCKED", "wave positions are not unique")
+    return sorted(members, key=lambda candidate: candidate["wave"]["position"])
+
+
+def validate_wave_ready(doc: dict, unit: dict) -> None:
+    members = wave_members(doc, unit)
+    if not members:
+        return
+    unterminated = [
+        candidate["unit_id"] for candidate in members
+        if not candidate.get("transport", {}).get("commit")
+    ]
+    if unterminated:
+        raise Operational(
+            "BLOCKED",
+            "every wave worker must terminalize before the first fold-in",
+            {"reason": "wave not fully terminalized", "units": unterminated},
+        )
+    changed_by_unit = {
+        candidate["unit_id"]: set(candidate["transport"].get("changed_paths", []))
+        for candidate in members
+    }
+    collisions: dict[str, list[str]] = {}
+    for index, left in enumerate(members):
+        for right in members[index + 1:]:
+            overlap = sorted(changed_by_unit[left["unit_id"]] & changed_by_unit[right["unit_id"]])
+            if overlap:
+                collisions[f'{left["unit_id"]}:{right["unit_id"]}'] = overlap
+    if collisions:
+        raise Operational(
+            "BLOCKED",
+            "wave transports have a changed-path collision",
+            {"reason": "changed-path collision", "collisions": collisions},
+        )
+
+
 def cmd_preflight(args) -> tuple[str, dict]:
     with locked_manifest(args.run_id) as doc:
         info = validate_repo(doc)
@@ -884,6 +934,7 @@ def cmd_preflight(args) -> tuple[str, dict]:
         if not unit or unit["state"] not in {"integration-pending", "preserved"}:
             raise Operational("REFUSED", "unit is not integration-pending")
         validate_lock(doc, args.unit_id, args.lock_token)
+        validate_wave_ready(doc, unit)
         allowed = set(unit["wave"].get("allowed_heads", []))
         if args.allowed_head:
             requested = {git_text(info["toplevel"], "rev-parse", f"{h}^{{commit}}") for h in args.allowed_head}
@@ -967,6 +1018,47 @@ def cmd_mark_committed(args) -> tuple[str, dict]:
         unit["state"] = "committed"
         event(doc, "canonical-commit-confirmed", args.unit_id, {"commit": commit["commit"]})
     return "COMMITTED", {"unit_id": args.unit_id, "canonical_commit": commit}
+
+
+def cmd_wave_advance(args) -> tuple[str, dict]:
+    with locked_manifest(args.run_id) as doc:
+        info = validate_repo(doc)
+        unit = doc["units"].get(args.unit_id)
+        if not unit or unit.get("state") != "committed":
+            raise Operational("REFUSED", "only a committed wave unit can advance its siblings")
+        validate_lock(doc, args.unit_id, args.lock_token)
+        members = wave_members(doc, unit)
+        if not members:
+            raise Operational("REFUSED", "unit does not belong to a parallel wave")
+        validate_wave_ready(doc, unit)
+        canonical = git_text(info["toplevel"], "rev-parse", f"{args.canonical_commit}^{{commit}}")
+        recorded = unit.get("integration", {}).get("canonical_commit", {})
+        if recorded.get("commit") != canonical or info["head"] != canonical:
+            raise Operational("BLOCKED", "canonical wave commit does not match manifest and HEAD")
+        parent = unit.get("integration", {}).get("pre_fold", {}).get("head")
+        if recorded.get("parent") != parent:
+            raise Operational("BLOCKED", "canonical wave commit parent is not the recorded pre-fold HEAD")
+        position = unit["wave"]["position"]
+        targets = [candidate for candidate in members if candidate["wave"]["position"] > position]
+        for candidate in targets:
+            allowed = candidate["wave"].get("allowed_heads", [])
+            if canonical in allowed:
+                continue
+            if not allowed or allowed[-1] != parent:
+                raise Operational("BLOCKED", "wave advancement is not the exact recorded canonical chain")
+    with locked_manifest(args.run_id, write=True) as doc:
+        unit = doc["units"][args.unit_id]
+        position = unit["wave"]["position"]
+        advanced: list[str] = []
+        for candidate in wave_members(doc, unit):
+            if candidate["wave"]["position"] <= position:
+                continue
+            allowed = candidate["wave"].setdefault("allowed_heads", [])
+            if canonical not in allowed:
+                allowed.append(canonical)
+            advanced.append(candidate["unit_id"])
+        event(doc, "wave-advanced", args.unit_id, {"canonical_commit": canonical, "eligible_siblings": advanced})
+    return "WAVE_ADVANCED", {"unit_id": args.unit_id, "canonical_commit": canonical, "eligible_siblings": advanced}
 
 
 def path_in_tree(repo: str, treeish: str, rel: str) -> bool:
@@ -1446,6 +1538,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--unit-id", required=True)
     p.add_argument("--lock-token", required=True)
 
+    p = sub.add_parser("wave-advance")
+    p.add_argument("--run-id", required=True)
+    p.add_argument("--unit-id", required=True)
+    p.add_argument("--lock-token", required=True)
+    p.add_argument("--canonical-commit", required=True)
+
     p = sub.add_parser("restore")
     p.add_argument("--run-id", required=True)
     p.add_argument("--unit-id", required=True)
@@ -1492,6 +1590,7 @@ COMMANDS = {
     "mark-applied": cmd_mark_applied,
     "mark-verified": cmd_mark_verified,
     "mark-committed": cmd_mark_committed,
+    "wave-advance": cmd_wave_advance,
     "restore": cmd_restore,
     "status": cmd_status,
     "resume": cmd_resume,

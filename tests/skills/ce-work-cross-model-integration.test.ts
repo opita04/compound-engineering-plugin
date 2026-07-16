@@ -44,6 +44,41 @@ function control(runs: string, ...args: string[]) {
   return { word, body: JSON.parse(body.join("\n")) }
 }
 
+function controlFailure(runs: string, ...args: string[]) {
+  const result = spawnSync("python3", [CONTROLLER, ...args], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      CE_WORK_RUNS_ROOT: runs,
+      CE_PEER_JOBS_ROOT: path.dirname(runs),
+    },
+    encoding: "utf8",
+  })
+  const [word, ...body] = result.stdout.trim().split("\n")
+  return { status: result.status, word, body: body.length ? JSON.parse(body.join("\n")) : null }
+}
+
+function fakeDoneJob(runs: string, runId: string, unitId: string, packetDigest: string, jobId: string) {
+  const dir = path.join(runs, runId, "jobs", jobId)
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  chmodSync(path.join(runs, runId, "jobs"), 0o700)
+  chmodSync(dir, 0o700)
+  const resultPath = path.join(runs, runId, "units", unitId, "result", "implementation-result.json")
+  writeFileSync(path.join(dir, "meta.json"), `${JSON.stringify({
+    job_id: jobId,
+    skill: "ce-work",
+    run_id: runId,
+    label: unitId,
+    input_digest: packetDigest,
+    result_path: resultPath,
+  })}\n`, { mode: 0o600 })
+  writeFileSync(path.join(dir, "status"), "done\n", { mode: 0o600 })
+  writeFileSync(path.join(dir, "reason"), "worker exited 0\n", { mode: 0o600 })
+  writeFileSync(path.join(dir, "out.log"), "activity\n", { mode: 0o600 })
+  writeFileSync(resultPath, '{"terminal_status":"completed","summary":"done","changed_files":[],"evidence":["fake"],"scope_expansion":null}\n', { mode: 0o600 })
+  return jobId
+}
+
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
@@ -184,5 +219,106 @@ printf '%s\n' '{"terminal_status":"completed","summary":"done","changed_files":[
     expect(control(runs, "integration-release", "--run-id", "serial-run", "--unit-id", "U4a", "--lock-token", token).word).toBe("RELEASED")
     expect(git(repo, "status", "--porcelain")).toBe("")
     expect(spawnSync("git", ["-C", repo, "show-ref", "--verify", transport.ref]).status).not.toBe(0)
+  }, 30_000)
+
+  test("same-base disjoint wave terminalizes together and lands as separate controlled host commits", () => {
+    const root = temp("ce-work-wave-")
+    const repo = path.join(root, "repo")
+    const runs = path.join(root, "jobs", "ce-work")
+    mkdirSync(repo)
+    git(repo, "init", "-b", "main")
+    git(repo, "config", "user.name", "CE Work Host")
+    git(repo, "config", "user.email", "host@example.test")
+    mkdirSync(path.join(repo, "docs", "plans"), { recursive: true })
+    const plan = path.join(repo, "docs", "plans", "plan.md")
+    writeFileSync(plan, "# Plan\n")
+    writeFileSync(path.join(repo, "seed.txt"), "seed\n")
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "seed")
+    const base = git(repo, "rev-parse", "HEAD")
+    const planDigest = createHash("sha256").update(readFileSync(plan)).digest("hex")
+
+    expect(control(
+      runs, "init", "--run-id", "wave-run", "--repo", repo, "--plan", plan,
+      "--plan-digest", planDigest,
+      "--binding-json", '{"mode":"prefer","target":"codex","model":null,"source":"test"}',
+      "--egress-json", '{"sanction_source":"test","route":"codex","intermediaries":[],"exposed_material":["wave"],"restrictions":[]}',
+    ).word).toBe("READY")
+
+    const units = [
+      { id: "U-a", position: "0", file: "a.txt", packet: "packet-a" },
+      { id: "U-b", position: "1", file: "b.txt", packet: "packet-b" },
+    ]
+    const transports: Record<string, any> = {}
+    for (const unit of units) {
+      const prepared = control(
+        runs, "prepare", "--run-id", "wave-run", "--unit-id", unit.id,
+        "--base", base, "--packet-digest", unit.packet,
+        "--wave-id", "wave-1", "--wave-position", unit.position,
+      )
+      expect(prepared.word).toBe("PREPARED")
+      expect(git(prepared.body.workspace, "rev-parse", "HEAD")).toBe(base)
+      writeFileSync(path.join(prepared.body.workspace, unit.file), `${unit.id}\n`)
+      const jobId = fakeDoneJob(runs, "wave-run", unit.id, unit.packet, `job-${unit.id}`)
+      expect(control(
+        runs, "record-job", "--run-id", "wave-run", "--unit-id", unit.id,
+        "--attempt-id", "attempt-1", "--job-id", jobId,
+      ).word).toBe("AUTHORING")
+      transports[unit.id] = control(runs, "terminalize", "--run-id", "wave-run", "--unit-id", unit.id).body.transport
+      expect(git(repo, "rev-list", "--parents", "-n", "1", transports[unit.id].commit).split(" ")).toEqual([
+        transports[unit.id].commit,
+        base,
+      ])
+    }
+
+    const firstLock = control(runs, "integration-acquire", "--run-id", "wave-run", "--unit-id", "U-a").body.lock_token
+    expect(control(runs, "preflight", "--run-id", "wave-run", "--unit-id", "U-a", "--lock-token", firstLock).word).toBe("PREFLIGHT_OK")
+    git(repo, "cherry-pick", "--no-commit", transports["U-a"].commit)
+    expect(control(runs, "mark-applied", "--run-id", "wave-run", "--unit-id", "U-a", "--lock-token", firstLock).word).toBe("APPLIED")
+    expect(control(
+      runs, "mark-verified", "--run-id", "wave-run", "--unit-id", "U-a", "--lock-token", firstLock,
+      "--evidence-digest", "verify-a",
+    ).word).toBe("VERIFIED")
+    git(repo, "commit", "-m", "feat(test): integrate U-a")
+    const firstCanonical = git(repo, "rev-parse", "HEAD")
+    expect(control(runs, "mark-committed", "--run-id", "wave-run", "--unit-id", "U-a", "--lock-token", firstLock).word).toBe("COMMITTED")
+    expect(control(
+      runs, "wave-advance", "--run-id", "wave-run", "--unit-id", "U-a",
+      "--lock-token", firstLock, "--canonical-commit", firstCanonical,
+    ).word).toBe("WAVE_ADVANCED")
+    expect(control(runs, "cleanup", "--run-id", "wave-run", "--unit-id", "U-a").word).toBe("CLEANED")
+    expect(control(runs, "integration-release", "--run-id", "wave-run", "--unit-id", "U-a", "--lock-token", firstLock).word).toBe("RELEASED")
+
+    const secondLock = control(runs, "integration-acquire", "--run-id", "wave-run", "--unit-id", "U-b").body.lock_token
+    writeFileSync(path.join(repo, "unknown.txt"), "unknown movement\n")
+    git(repo, "add", "unknown.txt")
+    git(repo, "commit", "-m", "unknown movement")
+    const unknownMovement = controlFailure(
+      runs, "preflight", "--run-id", "wave-run", "--unit-id", "U-b", "--lock-token", secondLock,
+      "--allowed-head", firstCanonical,
+    )
+    expect(unknownMovement.status).not.toBe(0)
+    expect(unknownMovement.word).toBe("BLOCKED")
+    git(repo, "reset", "--hard", firstCanonical)
+
+    expect(control(
+      runs, "preflight", "--run-id", "wave-run", "--unit-id", "U-b", "--lock-token", secondLock,
+      "--allowed-head", firstCanonical,
+    ).word).toBe("PREFLIGHT_OK")
+    git(repo, "cherry-pick", "--no-commit", transports["U-b"].commit)
+    expect(control(runs, "mark-applied", "--run-id", "wave-run", "--unit-id", "U-b", "--lock-token", secondLock).word).toBe("APPLIED")
+    expect(control(
+      runs, "mark-verified", "--run-id", "wave-run", "--unit-id", "U-b", "--lock-token", secondLock,
+      "--evidence-digest", "verify-b",
+    ).word).toBe("VERIFIED")
+    git(repo, "commit", "-m", "feat(test): integrate U-b")
+    const secondCanonical = git(repo, "rev-parse", "HEAD")
+    expect(control(runs, "mark-committed", "--run-id", "wave-run", "--unit-id", "U-b", "--lock-token", secondLock).word).toBe("COMMITTED")
+    expect(git(repo, "rev-list", "--parents", "-n", "1", secondCanonical).split(" ")).toEqual([secondCanonical, firstCanonical])
+    expect(readFileSync(path.join(repo, "a.txt"), "utf8")).toBe("U-a\n")
+    expect(readFileSync(path.join(repo, "b.txt"), "utf8")).toBe("U-b\n")
+    expect(control(runs, "cleanup", "--run-id", "wave-run", "--unit-id", "U-b").word).toBe("CLEANED")
+    expect(control(runs, "integration-release", "--run-id", "wave-run", "--unit-id", "U-b", "--lock-token", secondLock).word).toBe("RELEASED")
+    expect(git(repo, "status", "--porcelain")).toBe("")
   }, 30_000)
 })

@@ -258,6 +258,121 @@ describe("ce-work unit workspace controller", () => {
     expect(sh(f.repo, ["git", "rev-parse", "-q", "--verify", t.ref], false).status).not.toBe(0)
   }, 20000)
 
+  test("refuses a wave whose terminalized transports overlap", () => {
+    const f = makeRepo()
+    const runs = path.join(tmp("ce-work-runs-"), "ce-work")
+    init(runs, "run-wave-collision", f)
+    const transports: any[] = []
+    for (const [position, unitId] of ["U-a", "U-b"].entries()) {
+      ctl(
+        runs, "prepare", "--run-id", "run-wave-collision", "--unit-id", unitId,
+        "--base", f.base, "--packet-digest", `packet-${unitId}`,
+        "--wave-id", "wave-1", "--wave-position", String(position),
+      )
+      const workspace = path.join(runs, "run-wave-collision", "units", unitId, "workspace")
+      writeFileSync(path.join(workspace, "keep.txt"), `${unitId}\n`)
+    }
+    const terminalizeUnit = (unitId: string) => {
+      const job = fakeDoneJob(runs, "run-wave-collision", unitId, `packet-${unitId}`, `job-${unitId}`)
+      ctl(
+        runs, "record-job", "--run-id", "run-wave-collision", "--unit-id", unitId,
+        "--attempt-id", "attempt-1", "--job-id", job,
+      )
+      return ctl(runs, "terminalize", "--run-id", "run-wave-collision", "--unit-id", unitId).body.transport
+    }
+
+    transports.push(terminalizeUnit("U-a"))
+    const token = ctl(runs, "integration-acquire", "--run-id", "run-wave-collision", "--unit-id", "U-a").body.lock_token
+    const unterminated = ctl(
+      runs, "preflight", "--run-id", "run-wave-collision", "--unit-id", "U-a", "--lock-token", token,
+    )
+    expect(unterminated.word).toBe("BLOCKED")
+    expect(unterminated.body.reason).toBe("wave not fully terminalized")
+
+    transports.push(terminalizeUnit("U-b"))
+    const blocked = ctl(
+      runs, "preflight", "--run-id", "run-wave-collision", "--unit-id", "U-a", "--lock-token", token,
+    )
+    expect(blocked.word).toBe("BLOCKED")
+    expect(blocked.body.reason).toContain("changed-path collision")
+    expect(ctl(
+      runs, "cleanup", "--run-id", "run-wave-collision", "--unit-id", "U-a",
+      "--abandon", "--expect-transport", transports[0].commit,
+    ).word).toBe("CLEANED")
+    expect(ctl(
+      runs, "integration-release", "--run-id", "run-wave-collision", "--unit-id", "U-a", "--lock-token", token,
+    ).word).toBe("RELEASED")
+    expect(ctl(
+      runs, "cleanup", "--run-id", "run-wave-collision", "--unit-id", "U-b",
+      "--abandon", "--expect-transport", transports[1].commit,
+    ).word).toBe("CLEANED")
+  }, 20000)
+
+  test("restores a failed wave unit exactly before an unaffected sibling integrates", () => {
+    const f = makeRepo()
+    const runs = path.join(tmp("ce-work-runs-"), "ce-work")
+    init(runs, "run-wave-restore", f)
+    const transports: Record<string, any> = {}
+    for (const [position, unitId] of ["U-a", "U-b"].entries()) {
+      ctl(
+        runs, "prepare", "--run-id", "run-wave-restore", "--unit-id", unitId,
+        "--base", f.base, "--packet-digest", `packet-${unitId}`,
+        "--wave-id", "wave-1", "--wave-position", String(position),
+      )
+      const workspace = path.join(runs, "run-wave-restore", "units", unitId, "workspace")
+      writeFileSync(path.join(workspace, `${unitId}.txt`), `${unitId}\n`)
+      const job = fakeDoneJob(runs, "run-wave-restore", unitId, `packet-${unitId}`, `job-${unitId}`)
+      ctl(
+        runs, "record-job", "--run-id", "run-wave-restore", "--unit-id", unitId,
+        "--attempt-id", "attempt-1", "--job-id", job,
+      )
+      transports[unitId] = ctl(runs, "terminalize", "--run-id", "run-wave-restore", "--unit-id", unitId).body.transport
+    }
+
+    const failedToken = ctl(runs, "integration-acquire", "--run-id", "run-wave-restore", "--unit-id", "U-a").body.lock_token
+    expect(ctl(
+      runs, "preflight", "--run-id", "run-wave-restore", "--unit-id", "U-a", "--lock-token", failedToken,
+    ).word).toBe("PREFLIGHT_OK")
+    git(f.repo, "cherry-pick", "--no-commit", transports["U-a"].commit)
+    expect(ctl(
+      runs, "mark-applied", "--run-id", "run-wave-restore", "--unit-id", "U-a", "--lock-token", failedToken,
+    ).word).toBe("APPLIED")
+    // Canonical verification is treated as failed: restore before any sibling.
+    expect(ctl(
+      runs, "restore", "--run-id", "run-wave-restore", "--unit-id", "U-a", "--lock-token", failedToken,
+    ).word).toBe("PRESERVED")
+    expect(git(f.repo, "rev-parse", "HEAD")).toBe(f.base)
+    expect(git(f.repo, "status", "--porcelain")).toBe("")
+    expect(ctl(
+      runs, "integration-release", "--run-id", "run-wave-restore", "--unit-id", "U-a", "--lock-token", failedToken,
+    ).word).toBe("RELEASED")
+
+    const siblingToken = ctl(runs, "integration-acquire", "--run-id", "run-wave-restore", "--unit-id", "U-b").body.lock_token
+    expect(ctl(
+      runs, "preflight", "--run-id", "run-wave-restore", "--unit-id", "U-b", "--lock-token", siblingToken,
+    ).word).toBe("PREFLIGHT_OK")
+    git(f.repo, "cherry-pick", "--no-commit", transports["U-b"].commit)
+    ctl(runs, "mark-applied", "--run-id", "run-wave-restore", "--unit-id", "U-b", "--lock-token", siblingToken)
+    ctl(
+      runs, "mark-verified", "--run-id", "run-wave-restore", "--unit-id", "U-b", "--lock-token", siblingToken,
+      "--evidence-digest", "sibling-green",
+    )
+    git(f.repo, "commit", "-m", "feat(test): integrate unaffected sibling")
+    expect(ctl(
+      runs, "mark-committed", "--run-id", "run-wave-restore", "--unit-id", "U-b", "--lock-token", siblingToken,
+    ).word).toBe("COMMITTED")
+    expect(existsSync(path.join(f.repo, "U-a.txt"))).toBe(false)
+    expect(readFileSync(path.join(f.repo, "U-b.txt"), "utf8")).toBe("U-b\n")
+    expect(ctl(runs, "cleanup", "--run-id", "run-wave-restore", "--unit-id", "U-b").word).toBe("CLEANED")
+    expect(ctl(
+      runs, "integration-release", "--run-id", "run-wave-restore", "--unit-id", "U-b", "--lock-token", siblingToken,
+    ).word).toBe("RELEASED")
+    expect(ctl(
+      runs, "cleanup", "--run-id", "run-wave-restore", "--unit-id", "U-a",
+      "--abandon", "--expect-transport", transports["U-a"].commit,
+    ).word).toBe("CLEANED")
+  }, 20000)
+
   test("records the only dirty selected plan as a narrow checkpoint", () => {
     const f = makeRepo()
     const runs = path.join(tmp("ce-work-runs-"), "ce-work")
