@@ -24,6 +24,9 @@ concurrency:
   group: ce-candidate-${{ inputs.candidate_sha }}-${{ inputs.request_id }}
   cancel-in-progress: false
 
+env:
+  SANDBOX_ROOT: /tmp/ce-validation
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -92,18 +95,20 @@ jobs:
           set -euo pipefail
           sudo useradd --uid 2000 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin ce-validator
           sudo install -o root -g root -m 0755 "$(readlink -f "$(command -v bun)")" /usr/local/bin/bun
-          mkdir -p "$RUNNER_TEMP/ce-home" "$RUNNER_TEMP/ce-tmp" "$RUNNER_TEMP/ce-output"
-          sudo chown -R --no-dereference 2000:2000 candidate "$RUNNER_TEMP/ce-home" "$RUNNER_TEMP/ce-tmp" "$RUNNER_TEMP/ce-output"
-          sudo chmod 700 "$RUNNER_TEMP/ce-home" "$RUNNER_TEMP/ce-tmp" "$RUNNER_TEMP/ce-output"
+          sudo install -d -o root -g root -m 0711 "$SANDBOX_ROOT"
+          sudo cp -a candidate "$SANDBOX_ROOT/candidate"
+          sudo install -d -o 2000 -g 2000 -m 0700 \
+            "$SANDBOX_ROOT/home" "$SANDBOX_ROOT/tmp" "$SANDBOX_ROOT/output"
+          sudo chown -R --no-dereference 2000:2000 "$SANDBOX_ROOT/candidate"
 
       - name: Install locked dependencies without lifecycle scripts
         run: |
           set -euo pipefail
           sudo -u '#2000' /usr/bin/env -i \
             CI=1 NO_COLOR=1 \
-            HOME="$RUNNER_TEMP/ce-home" TMPDIR="$RUNNER_TEMP/ce-tmp" \
+            HOME="$SANDBOX_ROOT/home" TMPDIR="$SANDBOX_ROOT/tmp" \
             PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
-            /usr/local/bin/bun install --cwd "$PWD/candidate" --frozen-lockfile --ignore-scripts
+            /usr/local/bin/bun install --cwd "$SANDBOX_ROOT/candidate" --frozen-lockfile --ignore-scripts
 
       - name: Execute candidate as isolated UID with loopback-only networking
         run: |
@@ -136,8 +141,8 @@ jobs:
           chmod 700 "$RUNNER_TEMP/ce-sandbox-runner"
           node_bin="$(dirname "$(command -v node)")"
           sudo /usr/bin/env \
-            CE_HOME="$RUNNER_TEMP/ce-home" CE_TMP="$RUNNER_TEMP/ce-tmp" \
-            CE_PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$node_bin" CANDIDATE="$PWD/candidate" OUTPUT="$RUNNER_TEMP/ce-output" \
+            CE_HOME="$SANDBOX_ROOT/home" CE_TMP="$SANDBOX_ROOT/tmp" \
+            CE_PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$node_bin" CANDIDATE="$SANDBOX_ROOT/candidate" OUTPUT="$SANDBOX_ROOT/output" \
             /usr/bin/unshare --net --pid --mount-proc --fork --kill-child \
             "$RUNNER_TEMP/ce-sandbox-runner"
 
@@ -145,7 +150,7 @@ jobs:
         run: |
           set -euo pipefail
           for name in full-suite.xml full-suite.log full-suite.exit; do
-            path="$RUNNER_TEMP/ce-output/$name"
+            path="$SANDBOX_ROOT/output/$name"
             sudo test -f "$path"
             sudo test ! -L "$path"
             size="$(sudo stat -c %s "$path")"
@@ -155,15 +160,25 @@ jobs:
             fi
             sudo chown --no-dereference "$(id -u):$(id -g)" "$path"
           done
+          sudo chown "$(id -u):$(id -g)" "$SANDBOX_ROOT/output"
+          sudo chmod 700 "$SANDBOX_ROOT/output"
 
       - name: Enforce trusted structural result policy
         run: >-
           /usr/bin/python3 -I -S
           trusted/.github/validation/validate_candidate_results.py
-          "$RUNNER_TEMP/ce-output"
+          "$SANDBOX_ROOT/output"
 
       - name: Confirm candidate and trusted policy were not mutated
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
         run: |
           set -euo pipefail
           test -z "$(git -C trusted status --porcelain=v1 --untracked-files=all)"
           test -z "$(git -C candidate status --porcelain=v1 --untracked-files=no)"
+          test -z "$(sudo -u '#2000' git -C "$SANDBOX_ROOT/candidate" status --porcelain=v1 --untracked-files=no)"
+          test "$(sudo -u '#2000' git -C "$SANDBOX_ROOT/candidate" rev-parse HEAD)" = "$CANDIDATE_SHA"
+
+      - name: Remove disposable sandbox
+        if: always()
+        run: sudo rm -rf -- "$SANDBOX_ROOT"
