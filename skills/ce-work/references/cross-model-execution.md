@@ -73,6 +73,16 @@ Run this protocol from the host checkout for one ready unit at a time. Resolve e
 
 Project every transition into the direct commentary or return envelope: resolved route, plan checkpoint, dispatch, activity, terminal result, transport/scope inspection, integration, restoration if any, authoritative verification, canonical commit, cleanup, blocker, and recovery path. The serial protocol does not authorize parallel waves or automatic redispatch; those require their later gates.
 
+## Resume and fallback exactly once
+
+When the caller supplies a run id, use `unit-workspace.py` `resume --run-id <id>` and treat that id as authoritative. Without one, pass the canonical repository and selected-plan digest for discovery. Resume only a single unfinished run matching repository identity, branch, and plan digest; if several match, list the matching run ids and recovery paths rather than choosing one. An unsafe or foreign-mode manifest is a blocker, not a candidate to skip.
+
+Resume reconciles durable evidence, but must not redispatch, reapply, recommit, or run either owning tail. It may adopt exactly one matching unbound runner job, monitor a recorded live job, terminalize authoritative `done` output, continue an interrupted exact restoration, or record a verified canonical commit whose parent and tree match the pre-fold evidence. A transport ref written before its manifest row is reusable only when its sole parent and final tree match. Preflight records the expected post-apply tree and changed-path set: an exact match may reconcile an apply that landed before its manifest row, while unknown dirt blocks without destructive restoration.
+
+Use the controller's `status`, `reap`, and `cleanup` operations for preserved work. Loss of contact leaves a recorded job live until runner evidence becomes terminal or an explicit reap records termination. Cleanup is idempotent after an interrupted worktree removal. Explicit abandonment requires the exact transport SHA, or the exact terminal job id when a failed/reaped attempt produced no transport.
+
+Post-start fallback is a separate atomic gate. After authoritative failure, timeout, `died-without-result`, or exact restoration and lock release, call `unit-workspace.py` `claim-fallback` before native implementation. The first `prefer` claim authorizes exactly one native fallback; `FALLBACK_ALREADY_AUTHORIZED` means do not start it again. A live job or successful unreconciled output refuses the claim. Interactive `require` returns `CHOICE_REQUIRED` until the user explicitly confirms native continuation; headless `require` remains blocked. If integration began, no retry, sibling, or fallback claim is eligible until exact restoration is recorded and the canonical checkout still equals that snapshot.
+
 ## Preserve tail ownership
 
 The engine changes only implementation authorship. A standalone invocation resumes `ce-work`'s quality and shipping workflow after local implementation. `mode:return-to-caller` returns implementation and local-verification receipts with `standalone_shipping_skipped: true`; it never runs simplify/review/PR/CI gates owned by the caller. External workers never inherit either tail.

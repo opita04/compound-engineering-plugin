@@ -224,6 +224,23 @@ describe("ce-work cross-model engine contract", () => {
     expect(serial.indexOf("integration-acquire")).toBeLessThan(serial.indexOf("git cherry-pick --no-commit"))
     expect(serial.indexOf("mark-verified")).toBeLessThan(serial.indexOf("mark-committed"))
   })
+
+  test("defines exactly-once resume, recovery discovery, and post-start fallback gates", async () => {
+    const protocol = await readRepoFile("skills/ce-work/references/cross-model-execution.md")
+
+    expect(protocol).toContain("unit-workspace.py` `resume --run-id")
+    expect(protocol).toContain("list the matching run ids")
+    expect(protocol).toContain("must not redispatch, reapply, recommit, or run either owning tail")
+    expect(protocol).toContain("unit-workspace.py` `claim-fallback")
+    expect(protocol).toContain("exactly one native fallback")
+    expect(protocol).toContain("FALLBACK_ALREADY_AUTHORIZED")
+    expect(protocol).toContain("CHOICE_REQUIRED")
+    expect(protocol).toContain("headless `require` remains blocked")
+    expect(protocol).toContain("exact restoration")
+    expect(protocol).toContain("expected post-apply tree and changed-path set")
+    expect(protocol).toContain("unknown dirt blocks without destructive restoration")
+    expect(protocol).toContain("status`, `reap`, and `cleanup")
+  })
 })
 
 describe("ce-work implementation evidence characterization", () => {

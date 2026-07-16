@@ -39,6 +39,10 @@ O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 TERMINAL_PROCESS = {"done", "failed", "timeout", "died-without-result"}
 INTEGRATABLE_STATES = {"integration-pending", "integrated", "verified"}
+UNIT_STATES = {
+    "queued", "authoring", "authored", "integration-pending", "integrated",
+    "restoring", "verified", "committed", "preserved", "cleaned",
+}
 
 
 class Operational(Exception):
@@ -526,9 +530,15 @@ def cmd_prepare(args) -> tuple[str, dict]:
             "wave": {"id": args.wave_id, "base": base, "position": args.wave_position, "allowed_heads": [base]},
             "packet_digest": args.packet_digest,
             "workspace": {"path": workspace, "base": base, "registered": False},
-            "attempts": [{"attempt_id": attempt_id, "job_id": None, "process_state": "never-started", "activity": {"posture": args.activity_posture, "latest_at": None}}],
+            "attempts": [{
+                "attempt_id": attempt_id,
+                "job_id": None,
+                "process_state": "never-started",
+                "activity": {"posture": args.activity_posture, "latest_at": None},
+                "fallback": {"eligible": False, "reason": None, "claimed": None},
+            }],
             "transport": {"base": None, "tree": None, "commit": None, "ref": None, "digest": None, "changed_paths": []},
-            "integration": {"intent_revision": None, "pre_fold": None, "applied": None, "verification": None, "canonical_commit": None, "restore": None},
+            "integration": {"intent_revision": None, "pre_fold": None, "expected_apply": None, "applied": None, "verification": None, "canonical_commit": None, "restore": None},
             "cleanup": None,
             "recovery_path": unit_root,
         }
@@ -651,9 +661,17 @@ def sync_job(run_id: str, unit_id: str) -> dict:
         evidence = process_evidence(runner_job_dir(run_id, attempt["job_id"]))
     with locked_manifest(run_id, write=True) as doc:
         attempt = find_attempt(doc["units"][unit_id])
+        prior_state = attempt.get("process_state")
         attempt["process_state"] = evidence["process_state"]
         attempt["activity"].update(evidence["activity"])
+        if evidence["process_state"] in TERMINAL_PROCESS - {"done"}:
+            fallback = attempt.setdefault("fallback", {})
+            fallback.setdefault("claimed", None)
+            fallback["eligible"] = fallback.get("claimed") is None
+            fallback["reason"] = evidence["process_state"]
         event(doc, "job-synced", unit_id, {"process_state": evidence["process_state"]})
+        if prior_state != evidence["process_state"] and evidence["process_state"] in TERMINAL_PROCESS:
+            event(doc, "job-terminal", unit_id, {"process_state": evidence["process_state"]})
     return {"process_state": evidence["process_state"], "activity": attempt["activity"]}
 
 
@@ -818,6 +836,7 @@ def semantic_snapshot(repo: str) -> dict:
     head_tree = git_text(repo, "rev-parse", "HEAD^{tree}")
     index_tree = git_text(repo, "write-tree")
     raw = git(repo, "status", "--porcelain=v2", "-z", "--untracked-files=all")
+    worktree_index = git(repo, "diff", "--name-only", "-z")
     return {
         "head": head,
         "branch_ref": git_text(repo, "symbolic-ref", "-q", "HEAD", check=False),
@@ -825,7 +844,37 @@ def semantic_snapshot(repo: str) -> dict:
         "index_tree": index_tree,
         "status_sha256": digest_bytes(raw),
         "status_empty": not bool(raw),
+        "worktree_index_empty": not bool(worktree_index),
     }
+
+
+def expected_apply_snapshot(repo: str, pre_head: str, unit: dict) -> dict:
+    transport = unit["transport"]
+    if pre_head == transport["base"]:
+        tree = transport["tree"]
+    else:
+        # Compute the same semantic three-way result as applying the
+        # base-parented transport commit, without touching the canonical index.
+        merged = git_text(repo, "merge-tree", "--write-tree", pre_head, transport["commit"])
+        tree = merged.splitlines()[0] if merged else ""
+        if not tree:
+            raise Operational("BLOCKED", "could not derive expected canonical apply tree")
+    raw = git(repo, "diff-tree", "-r", "-M", "--name-status", "-z", pre_head, tree)
+    return {"index_tree": tree, "changed_paths": parse_diff_paths(raw)}
+
+
+def matches_expected_apply(repo: str, unit: dict, snap: dict | None = None) -> bool:
+    snap = snap or semantic_snapshot(repo)
+    pre = unit.get("integration", {}).get("pre_fold")
+    expected = unit.get("integration", {}).get("expected_apply")
+    if not pre or not expected:
+        return False
+    return (
+        snap["head"] == pre["head"]
+        and snap["index_tree"] == expected["index_tree"]
+        and snap["worktree_index_empty"]
+        and status_paths(repo) == set(expected["changed_paths"])
+    )
 
 
 def cmd_preflight(args) -> tuple[str, dict]:
@@ -845,12 +894,14 @@ def cmd_preflight(args) -> tuple[str, dict]:
         snap = semantic_snapshot(info["toplevel"])
         if not snap["status_empty"] or snap["index_tree"] != snap["head_tree"]:
             raise Operational("BLOCKED", "canonical checkout is not clean at preflight")
+        expected = expected_apply_snapshot(info["toplevel"], snap["head"], unit)
         intent_revision = doc["revision"] + 1
     with locked_manifest(args.run_id, write=True) as doc:
         unit = doc["units"][args.unit_id]
         unit["state"] = "integration-pending"
         unit["integration"]["intent_revision"] = intent_revision
         unit["integration"]["pre_fold"] = snap
+        unit["integration"]["expected_apply"] = expected
         event(doc, "canonical-apply-intent", args.unit_id, {"transport": unit["transport"]["commit"], "pre_head": snap["head"]})
     return "PREFLIGHT_OK", {"unit_id": args.unit_id, "pre_fold": snap, "transport": unit["transport"]}
 
@@ -865,12 +916,9 @@ def cmd_mark_applied(args) -> tuple[str, dict]:
         snap = semantic_snapshot(repo)
         if snap["head"] != unit["integration"]["pre_fold"]["head"]:
             raise Operational("BLOCKED", "canonical HEAD moved before apply was recorded")
-        transport_is_empty = (
-            unit["transport"]["tree"]
-            == git_text(repo, "rev-parse", f"{unit['transport']['base']}^{{tree}}")
-        )
-        if snap["status_empty"] and not transport_is_empty:
-            raise Operational("BLOCKED", "no applied change is present")
+        if not matches_expected_apply(repo, unit, snap):
+            raise Operational("BLOCKED", "canonical state does not match the expected transport application")
+    test_fault("after-apply-observed")
     with locked_manifest(args.run_id, write=True) as doc:
         unit = doc["units"][args.unit_id]
         unit["state"] = "integrated"
@@ -951,17 +999,37 @@ def remove_introduced_paths(repo: str, unit: dict) -> None:
 
 
 def restore(run_id: str, unit_id: str, lock_token: str) -> bool:
-    with locked_manifest(run_id, write=True) as doc:
+    with locked_manifest(run_id) as doc:
         validate_lock(doc, unit_id, lock_token)
         unit = doc["units"].get(unit_id)
         if not unit or not unit["integration"].get("pre_fold"):
             raise Operational("REFUSED", "unit has no pre-fold snapshot")
-        unit["state"] = "restoring"
-        event(doc, "restore-intent", unit_id)
         repo = doc["repository"]["toplevel"]
         pre = dict(unit["integration"]["pre_fold"])
-    git(repo, "cherry-pick", "--abort", check=False)
-    git(repo, "reset", "--hard", pre["head"])
+        git_dir = git_text(repo, "rev-parse", "--path-format=absolute", "--absolute-git-dir")
+        cherry_pick_head = os.path.join(git_dir, "CHERRY_PICK_HEAD")
+        expected_conflict = False
+        if os.path.isfile(cherry_pick_head) and git_text(repo, "rev-parse", "HEAD") == pre["head"]:
+            expected_conflict = Path(cherry_pick_head).read_text().strip() == unit["transport"]["commit"]
+        current = None if expected_conflict else semantic_snapshot(repo)
+        already_exact = current == pre if current else False
+        expected_apply = matches_expected_apply(repo, unit, current) if current else False
+        partial_reset = bool(current) and (
+            unit.get("state") == "restoring"
+            and current["head"] == pre["head"]
+            and current["index_tree"] == pre["index_tree"]
+            and current["worktree_index_empty"]
+            and status_paths(repo).issubset(set(unit["integration"]["expected_apply"]["changed_paths"]))
+        )
+        if not (already_exact or expected_apply or partial_reset or expected_conflict):
+            raise Operational("BLOCKED", "canonical state is not a proven in-flight transport state; refusing destructive restoration")
+    with locked_manifest(run_id, write=True) as doc:
+        unit = doc["units"][unit_id]
+        unit["state"] = "restoring"
+        event(doc, "restore-intent", unit_id)
+    if not already_exact:
+        git(repo, "cherry-pick", "--abort", check=False)
+        git(repo, "reset", "--hard", pre["head"])
     test_fault("restore-after-reset")
     with locked_manifest(run_id) as doc:
         unit = doc["units"][unit_id]
@@ -1002,7 +1070,78 @@ def cmd_status(args) -> tuple[str, dict]:
     return "STATUS", body
 
 
+def unfinished_run(doc: dict) -> bool:
+    units = doc.get("units")
+    if not isinstance(units, dict):
+        raise TrustFailure("manifest units are malformed")
+    if not units:
+        return True
+    states: list[str] = []
+    for uid, unit in units.items():
+        if not isinstance(uid, str) or not SAFE_ID.fullmatch(uid) or not isinstance(unit, dict):
+            raise TrustFailure("manifest unit identity or record is malformed")
+        state = unit.get("state")
+        if state not in UNIT_STATES:
+            raise TrustFailure(f"manifest unit state is invalid: {uid}")
+        states.append(state)
+    return any(state not in {"committed", "cleaned"} for state in states)
+
+
+def discover_resume_run(repo: str, plan_digest: str) -> tuple[str, list[dict]]:
+    if not re.fullmatch(r"[0-9a-f]{64}", plan_digest):
+        raise Operational("REFUSED", "plan digest must be a lowercase SHA-256 hex value")
+    root = ensure_root()
+    info = repo_info(repo)
+    candidates: list[dict] = []
+    for entry in sorted(os.scandir(root), key=lambda row: row.name):
+        if entry.name == ".locks":
+            continue
+        if not entry.is_dir(follow_symlinks=False):
+            raise TrustFailure(f"unexpected non-directory entry in run root: {entry.path}")
+        if not SAFE_ID.fullmatch(entry.name) or not entry.name.strip("."):
+            raise TrustFailure(f"unsafe run entry name: {entry.path}")
+        validate_private_dir(entry.path)
+        doc = read_private_json(os.path.join(entry.path, "manifest.json"))
+        if doc.get("schema_version") != SCHEMA_VERSION or doc.get("run_id") != entry.name:
+            raise TrustFailure(f"manifest schema or run identity mismatch: {entry.path}")
+        repository = doc.get("repository")
+        branch = doc.get("branch")
+        plan = doc.get("plan")
+        if not isinstance(repository, dict) or not isinstance(branch, dict) or not isinstance(plan, dict):
+            raise TrustFailure(f"manifest repository, branch, or plan record is malformed: {entry.path}")
+        is_unfinished = unfinished_run(doc)
+        if (
+            repository.get("identity_digest") == info["identity_digest"]
+            and repository.get("toplevel") == info["toplevel"]
+            and repository.get("git_dir") == info["git_dir"]
+            and branch.get("ref") == info["branch_ref"]
+            and plan.get("digest") == plan_digest
+            and is_unfinished
+        ):
+            candidates.append({
+                "run_id": entry.name,
+                "updated_at": doc.get("updated_at"),
+                "recovery_path": entry.path,
+                "unit_states": {uid: unit.get("state") for uid, unit in doc["units"].items()},
+            })
+    if not candidates:
+        raise Operational("NOT_FOUND", "no unfinished run matches repository, branch, and plan digest", {"candidates": []})
+    if len(candidates) > 1:
+        raise Operational("AMBIGUOUS", "multiple unfinished runs match; pass --run-id", {"candidates": candidates})
+    return candidates[0]["run_id"], candidates
+
+
+def resolve_resume_run(args) -> str:
+    if args.run_id:
+        return safe_id(args.run_id, "run id")
+    if not args.repo or not args.plan_digest:
+        raise Operational("REFUSED", "resume requires --run-id or both --repo and --plan-digest")
+    run_id, _ = discover_resume_run(args.repo, args.plan_digest)
+    return run_id
+
+
 def cmd_resume(args) -> tuple[str, dict]:
+    args.run_id = resolve_resume_run(args)
     actions: list[dict] = []
     with locked_manifest(args.run_id) as doc:
         validate_repo(doc)
@@ -1045,12 +1184,25 @@ def cmd_resume(args) -> tuple[str, dict]:
             exact = restore(args.run_id, uid, lock["nonce"])
             actions.append({"unit_id": uid, "action": "restored" if exact else "blocked"})
         elif state == "integration-pending" and unit["integration"].get("pre_fold") and lock and lock.get("unit_id") == uid:
+            validate_lock(doc, uid, lock["nonce"])
             repo = doc["repository"]["toplevel"]
             snap = semantic_snapshot(repo)
             if snap != unit["integration"]["pre_fold"]:
-                exact = restore(args.run_id, uid, lock["nonce"])
-                actions.append({"unit_id": uid, "action": "restored-ambiguous-apply" if exact else "blocked"})
+                if not matches_expected_apply(repo, unit, snap):
+                    raise Operational("BLOCKED", "canonical dirt does not match the expected in-flight transport; preserved for recovery")
+                with locked_manifest(args.run_id, write=True) as current:
+                    current_unit = current["units"][uid]
+                    current_unit["state"] = "integrated"
+                    current_unit["integration"]["applied"] = {
+                        "at": now_iso(),
+                        "post_index_tree": snap["index_tree"],
+                        "status_sha256": snap["status_sha256"],
+                        "reconciled": True,
+                    }
+                    event(current, "transport-apply-reconciled", uid, {"post_index_tree": snap["index_tree"]})
+                actions.append({"unit_id": uid, "action": "apply-reconciled"})
         elif state == "verified" and lock and lock.get("unit_id") == uid:
+            validate_lock(doc, uid, lock["nonce"])
             with locked_manifest(args.run_id) as current:
                 commit = reconcile_commit(current, current["units"][uid])
             if commit:
@@ -1062,8 +1214,77 @@ def cmd_resume(args) -> tuple[str, dict]:
     return "RESUMED", {"run_id": args.run_id, "actions": actions, "redispatched": False, "applied": False}
 
 
+def fallback_basis(doc: dict, unit: dict) -> tuple[str, dict]:
+    attempt = find_attempt(unit)
+    process_state = attempt.get("process_state")
+    if process_state in TERMINAL_PROCESS - {"done"}:
+        snap = semantic_snapshot(doc["repository"]["toplevel"])
+        allowed_heads = set(unit.get("wave", {}).get("allowed_heads", []))
+        if snap["head"] not in allowed_heads or not snap["status_empty"] or snap["index_tree"] != snap["head_tree"]:
+            raise Operational("BLOCKED", "canonical checkout diverged or is dirty; native fallback is not safe")
+        return str(process_state), attempt
+    restore_evidence = unit.get("integration", {}).get("restore")
+    if unit.get("state") == "preserved" and restore_evidence and restore_evidence.get("exact") is True:
+        if doc.get("integration_lock"):
+            raise Operational("REFUSED", "release the integration lock after exact restoration before fallback")
+        actual = semantic_snapshot(doc["repository"]["toplevel"])
+        expected = unit["integration"].get("pre_fold")
+        if actual != expected:
+            raise Operational("BLOCKED", "canonical checkout no longer matches the exact restored snapshot")
+        return "canonical-attempt-preserved", attempt
+    if process_state == "running":
+        raise Operational("REFUSED", "a live attempt still owns implementation; fallback is not authorized")
+    if process_state == "done":
+        raise Operational("REFUSED", "successful worker output must be reconciled rather than bypassed by fallback")
+    raise Operational("REFUSED", "no authoritative terminal or exactly restored attempt authorizes fallback")
+
+
+def cmd_claim_fallback(args) -> tuple[str, dict]:
+    # Refresh runner evidence first. A stale manifest cannot authorize native
+    # work while a detached attempt may still be live.
+    with locked_manifest(args.run_id) as doc:
+        validate_repo(doc)
+        unit = doc["units"].get(args.unit_id)
+        if not unit:
+            raise Operational("REFUSED", "unknown unit")
+        attempt = find_attempt(unit)
+        should_sync = bool(attempt.get("job_id")) and unit.get("state") == "authoring"
+    if should_sync:
+        sync_job(args.run_id, args.unit_id)
+
+    with locked_manifest(args.run_id, write=True) as doc:
+        validate_repo(doc)
+        unit = doc["units"].get(args.unit_id)
+        if not unit:
+            raise Operational("REFUSED", "unknown unit")
+        attempt = find_attempt(unit)
+        fallback = attempt.setdefault("fallback", {})
+        claimed = fallback.get("claimed")
+        if claimed:
+            return "FALLBACK_ALREADY_AUTHORIZED", {
+                "unit_id": args.unit_id,
+                "start_native": False,
+                "reason": claimed["reason"],
+                "claim": claimed,
+            }
+        reason, attempt = fallback_basis(doc, unit)
+        mode = doc.get("binding", {}).get("mode")
+        if mode == "require":
+            if args.caller_mode == "headless":
+                raise Operational("BLOCKED", "required external route terminated; headless callers cannot choose native fallback", {"unit_id": args.unit_id, "reason": reason})
+            if not args.confirm_native:
+                raise Operational("CHOICE_REQUIRED", "required external route terminated; ask whether to continue natively", {"unit_id": args.unit_id, "reason": reason})
+        elif mode != "prefer":
+            raise Operational("REFUSED", f"binding mode {mode!r} does not authorize native fallback")
+        claim = {"at": now_iso(), "reason": reason, "caller_mode": args.caller_mode, "mode": mode}
+        fallback.update({"eligible": False, "reason": reason, "claimed": claim})
+        event(doc, "native-fallback-authorized", args.unit_id, {"reason": reason, "mode": mode, "caller_mode": args.caller_mode})
+        return "FALLBACK_AUTHORIZED", {"unit_id": args.unit_id, "start_native": True, "reason": reason, "claim": claim}
+
+
 def cmd_reap(args) -> tuple[str, dict]:
     with locked_manifest(args.run_id) as doc:
+        validate_repo(doc)
         unit = doc["units"].get(args.unit_id)
         if not unit:
             raise Operational("REFUSED", "unknown unit")
@@ -1091,9 +1312,22 @@ def cmd_cleanup(args) -> tuple[str, dict]:
         if attempt.get("process_state") == "running":
             raise Operational("REFUSED", "cannot cleanup a live worker")
         commit = unit["transport"].get("commit")
+        abandonment_receipt = None
         if args.abandon:
-            if not commit or args.expect_transport != commit:
-                raise Operational("REFUSED", "abandon cleanup requires exact transport SHA")
+            if commit:
+                if args.expect_transport != commit:
+                    raise Operational("REFUSED", "abandon cleanup requires exact transport SHA")
+                abandonment_receipt = {"kind": "transport", "value": commit}
+            else:
+                terminal_failures = TERMINAL_PROCESS - {"done"}
+                if attempt.get("process_state") not in terminal_failures or not attempt.get("job_id"):
+                    raise Operational("REFUSED", "transport-free cleanup requires an authoritative failed or reaped job")
+                if args.expect_job != attempt["job_id"]:
+                    raise Operational("REFUSED", "transport-free cleanup requires the exact terminal job id")
+                observed = process_evidence(runner_job_dir(args.run_id, attempt["job_id"]))["process_state"]
+                if observed != attempt["process_state"] or observed not in terminal_failures:
+                    raise Operational("BLOCKED", "terminal job evidence changed; refusing cleanup")
+                abandonment_receipt = {"kind": "terminal-job", "value": attempt["job_id"], "process_state": observed}
         elif unit["state"] != "committed":
             raise Operational("REFUSED", "uncommitted output is retained unless explicitly abandoned")
         workspace = unit["workspace"]["path"]
@@ -1101,7 +1335,7 @@ def cmd_cleanup(args) -> tuple[str, dict]:
         repo = doc["repository"]["toplevel"]
         common = doc["repository"]["common_dir"]
     with locked_manifest(args.run_id, write=True) as doc:
-        event(doc, "cleanup-intent", args.unit_id, {"workspace": workspace, "ref": ref})
+        event(doc, "cleanup-intent", args.unit_id, {"workspace": workspace, "ref": ref, "abandonment_receipt": abandonment_receipt})
     with admin_lock(common):
         present = [r for r in worktree_rows(repo) if os.path.realpath(str(r.get("worktree", ""))) == os.path.realpath(workspace)]
         if present:
@@ -1117,7 +1351,13 @@ def cmd_cleanup(args) -> tuple[str, dict]:
             git(repo, "update-ref", "-d", ref, commit)
     with locked_manifest(args.run_id, write=True) as doc:
         unit = doc["units"][args.unit_id]
-        unit["cleanup"] = {"at": now_iso(), "workspace_removed": True, "ref_removed": True, "abandoned": bool(args.abandon)}
+        unit["cleanup"] = {
+            "at": now_iso(),
+            "workspace_removed": True,
+            "ref_removed": True,
+            "abandoned": bool(args.abandon),
+            "abandonment_receipt": abandonment_receipt,
+        }
         unit["state"] = "cleaned"
         event(doc, "unit-cleaned", args.unit_id)
     return "CLEANED", {"unit_id": args.unit_id, "resumed": False}
@@ -1216,13 +1456,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--unit-id")
 
     p = sub.add_parser("resume")
+    p.add_argument("--run-id")
+    p.add_argument("--repo")
+    p.add_argument("--plan-digest")
+
+    p = sub.add_parser("claim-fallback")
     p.add_argument("--run-id", required=True)
+    p.add_argument("--unit-id", required=True)
+    p.add_argument("--caller-mode", choices=("interactive", "headless"), required=True)
+    p.add_argument("--confirm-native", action="store_true")
 
     p = sub.add_parser("cleanup")
     p.add_argument("--run-id", required=True)
     p.add_argument("--unit-id", required=True)
     p.add_argument("--abandon", action="store_true")
     p.add_argument("--expect-transport")
+    p.add_argument("--expect-job")
 
     p = sub.add_parser("integration-release")
     p.add_argument("--run-id", required=True)
@@ -1246,6 +1495,7 @@ COMMANDS = {
     "restore": cmd_restore,
     "status": cmd_status,
     "resume": cmd_resume,
+    "claim-fallback": cmd_claim_fallback,
     "reap": cmd_reap,
     "cleanup": cmd_cleanup,
     "integration-release": cmd_integration_release,

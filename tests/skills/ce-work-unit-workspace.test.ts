@@ -74,6 +74,15 @@ function ctlWithEnv(runsRoot: string, extraEnv: Record<string, string>, ...args:
 }
 
 function init(runsRoot: string, runId: string, fixture: ReturnType<typeof makeRepo>) {
+  return initWithBinding(runsRoot, runId, fixture, "prefer")
+}
+
+function initWithBinding(
+  runsRoot: string,
+  runId: string,
+  fixture: ReturnType<typeof makeRepo>,
+  mode: "prefer" | "require",
+) {
   return ctl(
     runsRoot,
     "init",
@@ -81,9 +90,41 @@ function init(runsRoot: string, runId: string, fixture: ReturnType<typeof makeRe
     "--repo", fixture.repo,
     "--plan", fixture.plan,
     "--plan-digest", fixture.digest,
-    "--binding-json", '{"mode":"prefer","target":"codex","model":null,"source":"test"}',
+    "--binding-json", JSON.stringify({ mode, target: "codex", model: null, source: "test" }),
     "--egress-json", '{"sanction_source":"test","route":"codex","intermediaries":[],"exposed_material":["U2"],"restrictions":[]}',
   )
+}
+
+function fakeRunningJob(runsRoot: string, runId: string, unitId: string, packetDigest: string, id = "job-live") {
+  const dir = path.join(runsRoot, runId, "jobs", id)
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  chmodSync(path.join(runsRoot, runId, "jobs"), 0o700)
+  chmodSync(dir, 0o700)
+  const meta = {
+    job_id: id,
+    skill: "ce-work",
+    run_id: runId,
+    label: unitId,
+    input_digest: packetDigest,
+    result_path: path.join(runsRoot, runId, "units", unitId, "result", "implementation-result.json"),
+  }
+  for (const [name, value] of [
+    ["meta.json", JSON.stringify(meta) + "\n"],
+    ["pid", JSON.stringify({ supervisor_pid: 2_000_000_001, supervisor_pgid: 2_000_000_001, worker_pid: 2_000_000_002 }) + "\n"],
+    ["out.log", "last known activity\n"],
+  ]) {
+    writeFileSync(path.join(dir, name), value as string, { mode: 0o600 })
+    chmodSync(path.join(dir, name), 0o600)
+  }
+  return id
+}
+
+function terminalizeFakeJob(runsRoot: string, runId: string, id: string, state: "failed" | "timeout" | "died-without-result") {
+  const dir = path.join(runsRoot, runId, "jobs", id)
+  writeFileSync(path.join(dir, "status"), `${state}\n`, { mode: 0o600 })
+  writeFileSync(path.join(dir, "reason"), `test ${state}\n`, { mode: 0o600 })
+  chmodSync(path.join(dir, "status"), 0o600)
+  chmodSync(path.join(dir, "reason"), 0o600)
 }
 
 function fakeDoneJob(runsRoot: string, runId: string, unitId: string, packetDigest: string, id = "job-1") {
@@ -270,6 +311,91 @@ describe("ce-work unit workspace controller", () => {
     expect(ctl(runs, "cleanup", "--run-id", "run-crash", "--unit-id", "U", "--abandon", "--expect-transport", commit).word).toBe("CLEANED")
   }, 20000)
 
+  test("lists matching unfinished runs rather than guessing and fails closed on unsafe candidates", () => {
+    const f = makeRepo()
+    const runs = path.join(tmp("ce-work-runs-"), "ce-work")
+    init(runs, "run-one", f)
+    init(runs, "run-two", f)
+
+    const ambiguous = ctl(runs, "resume", "--repo", f.repo, "--plan-digest", f.digest)
+    expect(ambiguous.word).toBe("AMBIGUOUS")
+    expect(ambiguous.body.candidates.map((candidate: any) => candidate.run_id)).toEqual(["run-one", "run-two"])
+    expect(ctl(runs, "resume", "--run-id", "run-one").body.actions).toEqual([])
+
+    rmSync(path.join(runs, "run-two"), { recursive: true })
+    const unique = ctl(runs, "resume", "--repo", f.repo, "--plan-digest", f.digest)
+    expect(unique.word).toBe("RESUMED")
+    expect(unique.body.run_id).toBe("run-one")
+
+    init(runs, "run-two", f)
+    chmodSync(path.join(runs, "run-two", "manifest.json"), 0o644)
+    const unsafe = ctl(runs, "resume", "--repo", f.repo, "--plan-digest", f.digest)
+    expect(unsafe.word).toBe("UNREADABLE")
+    expect(unsafe.body).toBeNull()
+  })
+
+  test("never authorizes fallback for a live attempt and claims terminal prefer fallback exactly once", () => {
+    const f = makeRepo()
+    const runs = path.join(tmp("ce-work-runs-"), "ce-work")
+    init(runs, "run-fallback", f)
+    ctl(runs, "prepare", "--run-id", "run-fallback", "--unit-id", "U", "--base", f.base, "--packet-digest", "packet")
+    const job = fakeRunningJob(runs, "run-fallback", "U", "packet")
+    ctl(runs, "record-job", "--run-id", "run-fallback", "--unit-id", "U", "--attempt-id", "attempt-1", "--job-id", job)
+
+    const live = ctl(runs, "resume", "--run-id", "run-fallback")
+    expect(live.body.actions).toContainEqual({ unit_id: "U", action: "monitored", process_state: "running" })
+    expect(ctl(runs, "claim-fallback", "--run-id", "run-fallback", "--unit-id", "U", "--caller-mode", "headless").word).toBe("REFUSED")
+
+    terminalizeFakeJob(runs, "run-fallback", job, "failed")
+    expect(ctl(runs, "resume", "--run-id", "run-fallback").body.actions).toContainEqual({ unit_id: "U", action: "monitored", process_state: "failed" })
+    writeFileSync(path.join(f.repo, "unexpected.txt"), "host dirt\n")
+    expect(ctl(runs, "claim-fallback", "--run-id", "run-fallback", "--unit-id", "U", "--caller-mode", "headless").word).toBe("BLOCKED")
+    rmSync(path.join(f.repo, "unexpected.txt"))
+    const first = ctl(runs, "claim-fallback", "--run-id", "run-fallback", "--unit-id", "U", "--caller-mode", "headless")
+    expect(first.word).toBe("FALLBACK_AUTHORIZED")
+    expect(first.body.start_native).toBe(true)
+    expect(first.body.reason).toBe("failed")
+    const again = ctl(runs, "claim-fallback", "--run-id", "run-fallback", "--unit-id", "U", "--caller-mode", "headless")
+    expect(again.word).toBe("FALLBACK_ALREADY_AUTHORIZED")
+    expect(again.body.start_native).toBe(false)
+  })
+
+  test("explicit reap records authoritative termination before fallback", () => {
+    const f = makeRepo()
+    const runs = path.join(tmp("ce-work-runs-"), "ce-work")
+    init(runs, "run-reap", f)
+    ctl(runs, "prepare", "--run-id", "run-reap", "--unit-id", "U", "--base", f.base, "--packet-digest", "packet")
+    const job = fakeRunningJob(runs, "run-reap", "U", "packet")
+    ctl(runs, "record-job", "--run-id", "run-reap", "--unit-id", "U", "--attempt-id", "attempt-1", "--job-id", job)
+
+    const reaped = ctl(runs, "reap", "--run-id", "run-reap", "--unit-id", "U")
+    expect(reaped.word).toBe("REAPED")
+    expect(reaped.body.process_state).toBe("died-without-result")
+    const status = ctl(runs, "status", "--run-id", "run-reap", "--unit-id", "U")
+    expect(status.body.unit.attempts[0].fallback).toMatchObject({ eligible: true, reason: "died-without-result", claimed: null })
+    expect(ctl(runs, "claim-fallback", "--run-id", "run-reap", "--unit-id", "U", "--caller-mode", "headless").word).toBe("FALLBACK_AUTHORIZED")
+    expect(ctl(runs, "cleanup", "--run-id", "run-reap", "--unit-id", "U", "--abandon", "--expect-job", "wrong-job").word).toBe("REFUSED")
+    expect(ctl(runs, "cleanup", "--run-id", "run-reap", "--unit-id", "U", "--abandon", "--expect-job", job).word).toBe("CLEANED")
+    expect(ctl(runs, "claim-fallback", "--run-id", "run-reap", "--unit-id", "U", "--caller-mode", "headless").word).toBe("FALLBACK_ALREADY_AUTHORIZED")
+  }, 20000)
+
+  test("require blocks headless fallback and needs an explicit interactive choice", () => {
+    const f = makeRepo()
+    const runs = path.join(tmp("ce-work-runs-"), "ce-work")
+    initWithBinding(runs, "run-require", f, "require")
+    ctl(runs, "prepare", "--run-id", "run-require", "--unit-id", "U", "--base", f.base, "--packet-digest", "packet")
+    const job = fakeRunningJob(runs, "run-require", "U", "packet")
+    ctl(runs, "record-job", "--run-id", "run-require", "--unit-id", "U", "--attempt-id", "attempt-1", "--job-id", job)
+    terminalizeFakeJob(runs, "run-require", job, "timeout")
+    ctl(runs, "resume", "--run-id", "run-require")
+
+    expect(ctl(runs, "claim-fallback", "--run-id", "run-require", "--unit-id", "U", "--caller-mode", "headless").word).toBe("BLOCKED")
+    expect(ctl(runs, "claim-fallback", "--run-id", "run-require", "--unit-id", "U", "--caller-mode", "interactive").word).toBe("CHOICE_REQUIRED")
+    const confirmed = ctl(runs, "claim-fallback", "--run-id", "run-require", "--unit-id", "U", "--caller-mode", "interactive", "--confirm-native")
+    expect(confirmed.word).toBe("FALLBACK_AUTHORIZED")
+    expect(confirmed.body.start_native).toBe(true)
+  })
+
   test("refuses ambiguous job adoption and preserves output on canonical divergence", () => {
     const f = makeRepo()
     const runs = path.join(tmp("ce-work-runs-"), "ce-work")
@@ -346,8 +472,16 @@ describe("ce-work unit workspace controller", () => {
     const token = ctl(runs, "integration-acquire", "--run-id", "run-restore", "--unit-id", "U").body.lock_token
     ctl(runs, "preflight", "--run-id", "run-restore", "--unit-id", "U", "--lock-token", token)
     git(f.repo, "cherry-pick", "--no-commit", transport.commit)
+    const applyInterrupted = ctlWithEnv(
+      runs,
+      { CE_WORK_TEST_FAULT: "after-apply-observed" },
+      "mark-applied", "--run-id", "run-restore", "--unit-id", "U", "--lock-token", token,
+    )
+    expect(applyInterrupted.word).toBe("INTERRUPTED")
     const recovered = ctl(runs, "resume", "--run-id", "run-restore")
-    expect(recovered.body.actions.map((a: any) => a.action)).toContain("restored-ambiguous-apply")
+    expect(recovered.body.actions.map((a: any) => a.action)).toContain("apply-reconciled")
+    expect(ctl(runs, "status", "--run-id", "run-restore", "--unit-id", "U").body.unit.state).toBe("integrated")
+    expect(ctl(runs, "restore", "--run-id", "run-restore", "--unit-id", "U", "--lock-token", token).word).toBe("PRESERVED")
     expect(git(f.repo, "status", "--porcelain")).toBe("")
 
     expect(ctl(runs, "preflight", "--run-id", "run-restore", "--unit-id", "U", "--lock-token", token).word).toBe("PREFLIGHT_OK")
@@ -363,8 +497,17 @@ describe("ce-work unit workspace controller", () => {
     expect(blocked.word).toBe("BLOCKED")
     expect(existsSync(path.join(f.repo, "unknown.txt"))).toBe(true)
     rmSync(path.join(f.repo, "unknown.txt"))
-    expect(ctl(runs, "resume", "--run-id", "run-restore").body.actions.map((a: any) => a.action)).toContain("restored")
+    expect(ctl(runs, "resume", "--run-id", "run-restore").body.actions.map((a: any) => a.action)).toContain("apply-reconciled")
+    writeFileSync(path.join(f.repo, "keep.txt"), "unknown tracked edit\n")
+    expect(ctl(runs, "restore", "--run-id", "run-restore", "--unit-id", "U", "--lock-token", token).word).toBe("BLOCKED")
+    expect(readFileSync(path.join(f.repo, "keep.txt"), "utf8")).toBe("unknown tracked edit\n")
+    git(f.repo, "restore", "--worktree", "keep.txt")
+    expect(ctl(runs, "restore", "--run-id", "run-restore", "--unit-id", "U", "--lock-token", token).word).toBe("PRESERVED")
+    expect(ctl(runs, "claim-fallback", "--run-id", "run-restore", "--unit-id", "U", "--caller-mode", "headless").word).toBe("REFUSED")
     expect(ctl(runs, "integration-release", "--run-id", "run-restore", "--unit-id", "U", "--lock-token", token).word).toBe("RELEASED")
+    const fallback = ctl(runs, "claim-fallback", "--run-id", "run-restore", "--unit-id", "U", "--caller-mode", "headless")
+    expect(fallback.word).toBe("FALLBACK_AUTHORIZED")
+    expect(fallback.body.reason).toBe("canonical-attempt-preserved")
     expect(ctl(runs, "cleanup", "--run-id", "run-restore", "--unit-id", "U", "--abandon", "--expect-transport", transport.commit).word).toBe("CLEANED")
   }, 25000)
 })
