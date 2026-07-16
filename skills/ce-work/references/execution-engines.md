@@ -77,7 +77,7 @@ Follow the dispatch strategy in `SKILL.md` Phase 1 Step 4 (inline, serial subage
 
 ### Cross-model execution
 
-Read `cross-model-execution.md` only after routing selects this engine. Resolve and disclose its fixed recipient and restrictions before egress. If the route is unavailable at preflight, apply the preference/requirement behavior defined there; never let the detached worker select a fallback recipient.
+Read `cross-model-execution.md` only after routing selects this engine. Resolve and disclose its fixed recipient and restrictions before egress, then follow its serial external-unit transaction through the bundled controller, detached runner, and fixed adapter. If the route is unavailable at preflight, apply the preference/requirement behavior defined there; never let the detached worker select a fallback recipient.
 
 ### Goal-mode and dynamic-workflow
 

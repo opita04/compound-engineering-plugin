@@ -192,6 +192,38 @@ describe("ce-work cross-model engine contract", () => {
     }
     expect(caller).toContain("standalone_shipping_skipped: true")
   })
+
+  test("defines an executable serial external-unit transaction before any parallel protocol", async () => {
+    const protocol = await readRepoFile("skills/ce-work/references/cross-model-execution.md")
+    const serial = sliceSection(protocol, "## Serial external-unit protocol", "## Preserve tail ownership")
+
+    for (const command of [
+      "unit-workspace.py` `init",
+      "unit-workspace.py` `checkpoint-plan",
+      "unit-workspace.py` `prepare",
+      "peer-job-runner.py` `start --no-sweep",
+      "cross-model-work.sh",
+      "unit-workspace.py` `record-job",
+      "unit-workspace.py` `terminalize",
+      "unit-workspace.py` `integration-acquire",
+      "unit-workspace.py` `preflight",
+      "git cherry-pick --no-commit",
+      "unit-workspace.py` `mark-applied",
+      "unit-workspace.py` `mark-verified",
+      "unit-workspace.py` `mark-committed",
+      "unit-workspace.py` `cleanup",
+      "unit-workspace.py` `integration-release",
+    ]) {
+      expect(serial).toContain(command)
+    }
+    expect(serial).toContain("one bounded unit packet")
+    expect(serial).toContain("inspect the actual transport diff")
+    expect(serial).toContain("authoritative canonical verification")
+    expect(serial).toContain("restore")
+    expect(serial).toContain("before fallback, retry, or another unit")
+    expect(serial.indexOf("integration-acquire")).toBeLessThan(serial.indexOf("git cherry-pick --no-commit"))
+    expect(serial.indexOf("mark-verified")).toBeLessThan(serial.indexOf("mark-committed"))
+  })
 })
 
 describe("ce-work implementation evidence characterization", () => {

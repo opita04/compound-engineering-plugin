@@ -4,6 +4,8 @@
 
 For each task in priority order:
 
+When the selected engine is cross-model execution, this loop still owns unit ordering, evidence selection, actual-scope inspection, authoritative verification, and incremental canonical commits, but worker authoring follows the serial external-unit protocol in `references/cross-model-execution.md`. Detached process completion is only authoring evidence; do not mark the task complete until the controller records the host-owned canonical commit. A preserved or restoration-blocked unit stops this loop before fallback, retry, or the next unit.
+
 ```
 while (tasks remain):
   - Mark task as in-progress
