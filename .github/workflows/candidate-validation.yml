@@ -1,5 +1,5 @@
 name: Candidate Validation
-run-name: Validate CE candidate ${{ inputs.candidate_sha }}
+run-name: Validate CE candidate ${{ inputs.candidate_sha }} request ${{ inputs.request_id }}
 
 on:
   workflow_dispatch:
@@ -12,12 +12,16 @@ on:
         description: Exact trusted fork-main commit used to build the candidate
         required: true
         type: string
+      request_id:
+        description: Unique worker-generated dispatch correlation ID
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: ce-candidate-${{ inputs.candidate_sha }}
+  group: ce-candidate-${{ inputs.candidate_sha }}-${{ inputs.request_id }}
   cancel-in-progress: false
 
 env:
@@ -32,6 +36,7 @@ jobs:
         env:
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
           BASE_SHA: ${{ inputs.base_sha }}
+          REQUEST_ID: ${{ inputs.request_id }}
         run: |
           set -euo pipefail
           for value in "$CANDIDATE_SHA" "$BASE_SHA"; do
@@ -40,6 +45,10 @@ jobs:
               exit 2
             fi
           done
+          if [[ ! "$REQUEST_ID" =~ ^[0-9a-f]{32}$ ]]; then
+            echo "request_id must be 32 lowercase hexadecimal characters" >&2
+            exit 2
+          fi
           test "${GITHUB_REF}" = "refs/heads/main"
           test "${GITHUB_SHA}" = "$BASE_SHA"
 
@@ -86,6 +95,7 @@ jobs:
         run: |
           set -euo pipefail
           docker run --rm \
+            --user 1000:1000 \
             --cap-drop=ALL \
             --security-opt=no-new-privileges \
             --memory=4g --cpus=2 --pids-limit=512 \
@@ -102,6 +112,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/ce-output"
           sudo chown 1000:1000 "$RUNNER_TEMP/ce-output"
           docker run --rm \
+            --user 1000:1000 \
             --network=none \
             --cap-drop=ALL \
             --security-opt=no-new-privileges \
