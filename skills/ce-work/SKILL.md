@@ -1,7 +1,7 @@
 ---
 name: ce-work
-description: Execute a plan or concrete work prompt end-to-end. Use when implementing from docs/plans, a spec path, or a clear build request; use ce-debug for open-ended bugs. Standalone use owns the shipping tail; outer orchestrators pass `mode:return-to-caller <plan path>` for implementation and local verification only.
-argument-hint: "[Plan path or work description; blank uses latest] | [mode:return-to-caller <plan path> for outer orchestrators]"
+description: Execute a plan or concrete work prompt end-to-end. Use when implementing from docs/plans, a spec path, or a clear build request; use ce-debug for open-ended bugs. Standalone use owns the shipping tail; outer orchestrators pass `mode:return-to-caller [implementation_engine:<compact-json>] <plan path>` for implementation and local verification only.
+argument-hint: "[Plan path or work description; blank uses latest] | [mode:return-to-caller [implementation_engine:<compact-json>] <plan path> for outer orchestrators]"
 ---
 
 # Work Execution Command
@@ -21,7 +21,7 @@ The **input document** for this run is the input this skill was invoked with —
 
 ### Phase 0: Input Triage
 
-**First, parse a leading mode token.** If `<input_document>` begins with `mode:return-to-caller` (or the legacy aliases `mode:caller-owned-tail` / `caller:lfg`), strip that token before anything else: the remainder of the string is the plan path, and this run executes in **Return-to-Caller Mode** (see § Return-to-Caller Mode) — implement and locally verify only, then return the structured envelope instead of running the standalone shipping tail. Classify the stripped plan path with the rules below. A mode token with no following path is an error: report it rather than treating `mode:return-to-caller` as a bare prompt.
+**First, parse a leading mode token.** If `<input_document>` begins with `mode:return-to-caller` (or the legacy aliases `mode:caller-owned-tail` / `caller:lfg`), strip that token before anything else and enter **Return-to-Caller Mode** (see § Return-to-Caller Mode) — implement and locally verify only, then return the structured envelope instead of running the standalone shipping tail. The next item may be one compact JSON object prefixed exactly `implementation_engine:`; when present, consume it as the typed caller binding, require exactly `mode`, `target`, `model`, and `source` with the types and values defined in `references/execution-engines.md`, and reject malformed JSON, missing/extra fields, or a second carrier. The entire remaining string is the plan path. Classify that stripped plan path with the rules below. A mode token with no following path is an error; a carrier with no following path is also an error. Report either instead of treating the control data as a bare prompt. Without the optional carrier, the original `mode:return-to-caller <plan-path>` form is unchanged and standing configuration remains eligible.
 
 Determine how to proceed based on what was provided in `<input_document>` (after any mode token is stripped).
 

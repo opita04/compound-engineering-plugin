@@ -262,7 +262,7 @@ describe("verification_evidence seam parity (ce-work <-> lfg)", () => {
 
     // One-shot retry on the same plan path (idempotency backfill), no user prompt.
     expect(gate).toContain(
-      "invoke `ce-work` one more time with the same `mode:return-to-caller <plan-path-from-step-1>` argument"
+      "invoke `ce-work` one more time with the exact same step-2 argument"
     )
     expect(gate).toContain("Do not prompt the user and do not alter the plan path argument")
     // Second still-missing return stops blocked instead of continuing to ship.

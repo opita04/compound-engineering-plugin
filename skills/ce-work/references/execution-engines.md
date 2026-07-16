@@ -23,7 +23,7 @@ An automatic caller may pass an `implementation_engine` object with exactly thes
 - `model`: an optional model pin, otherwise `null`
 - `source`: the binding's caller-visible provenance
 
-Accept this carrier only at the `ce-work` seam, beside `mode:return-to-caller`; its fields never enter planning or review input. Once resolved, preserve the binding and source in the durable run receipt. Downstream consumers and workers may narrow its authority or restrictions but never broaden them.
+Accept this carrier only at the `ce-work` seam, beside `mode:return-to-caller`; its fields never enter planning or review input. On string-only skill hosts the concrete envelope is `mode:return-to-caller implementation_engine:<compact-json> <plan-path>`, where `<compact-json>` is that exact four-field object with no formatting whitespace (for example `implementation_engine:{"mode":"prefer","target":"codex","model":null,"source":"lfg-current-turn"}`). The original no-carrier form stays `mode:return-to-caller <plan-path>`. Once resolved, preserve the binding and source in the durable run receipt. Downstream consumers and workers may narrow its authority or restrictions but never broaden them.
 
 ### Target and identity vocabulary
 

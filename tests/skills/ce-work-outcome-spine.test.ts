@@ -113,9 +113,23 @@ describe("ce-work cross-model engine contract", () => {
       expect(carrier).toContain(`\`${field}\``)
     }
     expect(carrier).toContain("exactly these four fields")
+    expect(carrier).toContain("mode:return-to-caller implementation_engine:<compact-json> <plan-path>")
+    expect(carrier).toContain('implementation_engine:{"mode":"prefer","target":"codex","model":null,"source":"lfg-current-turn"}')
     expect(carrier).toContain("only at the `ce-work` seam")
     expect(carrier).toContain("never enter planning or review input")
     expect(engines).not.toContain("work_delegate_")
+  })
+
+  test("gives string-only callers an exact optional carrier grammar", async () => {
+    const skill = await readRepoFile("skills/ce-work/SKILL.md")
+    const phase0 = sliceSection(skill, "### Phase 0: Input Triage", "**Plan document**")
+
+    expect(phase0).toContain("implementation_engine:")
+    expect(phase0).toContain("one compact JSON object")
+    expect(phase0).toContain("exactly `mode`, `target`, `model`, and `source`")
+    expect(phase0).toContain("reject malformed JSON, missing/extra fields, or a second carrier")
+    expect(phase0).toContain("entire remaining string is the plan path")
+    expect(phase0).toContain("original `mode:return-to-caller <plan-path>` form is unchanged")
   })
 
   test("distinguishes Cursor from Composer and collapses same-host default execution", async () => {
