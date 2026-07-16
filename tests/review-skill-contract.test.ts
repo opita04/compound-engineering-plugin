@@ -970,6 +970,11 @@ describe("cross-model peer skip legibility", () => {
       expect(src).toMatch(/new disclosure and sanction|newly disclosed and sanctioned/i)
       expect(src).toMatch(/never changes? recipients? internally|no worker-internal recipient fallback/i)
     }
+
+    const docReviewEval = await readRepoFile("skills/ce-doc-review/references/cross-model-eval.md")
+    const wholeDocCase = docReviewEval.match(/10\. \*\*Whole-document sweep[\s\S]*?(?=\n11\. \*\*)/)?.[0]
+    expect(wholeDocCase).toContain("`independence_verified: true`")
+    expect(wholeDocCase).toMatch(/false or\s+absent independence[\s\S]*without promotion/)
   })
 })
 

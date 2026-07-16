@@ -94,7 +94,9 @@ PATH — and cross-host per the repo's eval default: Claude Code AND Codex.
     assert exactly **one** additional `whole-doc` call is launched (not one per
     lens) on the **full** document with the same resolved provider, folds in as
     `whole-doc-<provider>`, and a sweep finding sharing a fingerprint with *any*
-    in-process finding promotes one anchor step (no in-process twin needed); the
+    in-process finding promotes one anchor step (no in-process twin needed) only
+    when the whole-doc artifact has `independence_verified: true`; with false or
+    absent independence it remains attributed evidence without promotion. The
     sweep is never `safe_auto`. Assert that on a **unified plan** the trio peers
     receive their in-process twin's slice (e.g. product-lens/adversarial get the
     Product Contract), not the full document.
